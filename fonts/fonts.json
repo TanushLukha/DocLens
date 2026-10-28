@@ -1,0 +1,317 @@
+[
+ {
+  "file": "NotoSansDevanagari-Regular.ttf",
+  "name": "Noto Sans Devanagari",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "NotoSansDevanagari-Bold.ttf",
+  "name": "Noto Sans Devanagari Bold",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "NotoSerifDevanagari-Regular.ttf",
+  "name": "Noto Serif Devanagari",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "NotoSerifDevanagari-Bold.ttf",
+  "name": "Noto Serif Devanagari Bold",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "Lohit-Devanagari.ttf",
+  "name": "Lohit Devanagari",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "AnnapurnaSIL-Regular.ttf",
+  "name": "Annapurna SIL",
+  "scripts": [
+   "deva"
+  ],
+  "split": "test",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "AnnapurnaSIL-Bold.ttf",
+  "name": "Annapurna SIL Bold",
+  "scripts": [
+   "deva"
+  ],
+  "split": "test",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "IBMPlexSansDevanagari-Regular.ttf",
+  "name": "IBM Plex Sans Devanagari",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "IBMPlexSansDevanagari-Medium.ttf",
+  "name": "IBM Plex Sans Devanagari Medium",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "IBMPlexSansDevanagari-Bold.ttf",
+  "name": "IBM Plex Sans Devanagari Bold",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "Gargi.ttf",
+  "name": "Gargi",
+  "scripts": [
+   "deva"
+  ],
+  "split": "test",
+  "license": "GPL 2.0 or later"
+ },
+ {
+  "file": "nakula.ttf",
+  "name": "Nakula",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "GPL 2.0 or later"
+ },
+ {
+  "file": "sahadeva.ttf",
+  "name": "Sahadeva",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "GPL 2.0 or later"
+ },
+ {
+  "file": "Samyak-Devanagari.ttf",
+  "name": "Samyak Devanagari",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "GPL 3.0 or later, font exception"
+ },
+ {
+  "file": "Sarai.ttf",
+  "name": "Sarai",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "GPL 2.0"
+ },
+ {
+  "file": "kalimati.ttf",
+  "name": "Kalimati",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "GPL 2.0 or later"
+ },
+ {
+  "file": "Aksharyogini2Normal.ttf",
+  "name": "Aksharyogini 2",
+  "scripts": [
+   "deva"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "NotoSans-Regular.ttf",
+  "name": "Noto Sans",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "NotoSans-Bold.ttf",
+  "name": "Noto Sans Bold",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "NotoSerif-Regular.ttf",
+  "name": "Noto Serif",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "DejaVuSans.ttf",
+  "name": "DejaVu Sans",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "Bitstream Vera"
+ },
+ {
+  "file": "DejaVuSerif.ttf",
+  "name": "DejaVu Serif",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "Bitstream Vera"
+ },
+ {
+  "file": "LiberationSans-Regular.ttf",
+  "name": "Liberation Sans",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "LiberationSans-Bold.ttf",
+  "name": "Liberation Sans Bold",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "LiberationSerif-Regular.ttf",
+  "name": "Liberation Serif",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "LiberationMono-Regular.ttf",
+  "name": "Liberation Mono",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "OpenSans-Regular.ttf",
+  "name": "Open Sans",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "Apache 2.0"
+ },
+ {
+  "file": "Lato-Regular.ttf",
+  "name": "Lato",
+  "scripts": [
+   "latn"
+  ],
+  "split": "test",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "Lato-Bold.ttf",
+  "name": "Lato Bold",
+  "scripts": [
+   "latn"
+  ],
+  "split": "test",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "Roboto-Regular.ttf",
+  "name": "Roboto",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "Apache 2.0"
+ },
+ {
+  "file": "Carlito-Regular.ttf",
+  "name": "Carlito",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "Caladea-Regular.ttf",
+  "name": "Caladea",
+  "scripts": [
+   "latn"
+  ],
+  "split": "test",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "IBMPlexSans-Regular.ttf",
+  "name": "IBM Plex Sans",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "IBMPlexSerif-Regular.ttf",
+  "name": "IBM Plex Serif",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ },
+ {
+  "file": "IBMPlexMono-Regular.ttf",
+  "name": "IBM Plex Mono",
+  "scripts": [
+   "latn"
+  ],
+  "split": "train",
+  "license": "OFL 1.1"
+ }
+]

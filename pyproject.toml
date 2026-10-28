@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doclens"
+version = "0.1.0"
+description = "Reads printed Hindi and English documents: OCR and key information extraction, built and measured from first principles"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Tanush Lukha" }]
+dependencies = ["numpy>=1.24", "opencv-python>=4.8", "pillow>=10.1", "regex>=2023.0", "fonttools>=4.40"]
+
+[project.optional-dependencies]
+data = ["huggingface_hub>=0.24", "pyarrow>=14", "datasets>=2.16"]
+dev = ["pytest>=7", "rapidfuzz>=3.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
