@@ -4,7 +4,7 @@ import torch
 
 from doclens import crnn, fonts
 from doclens.alphabet import Alphabet
-from doclens.crnn import CRNN, CRNNConfig, collate, prepare
+from doclens.crnn import CRNN, BiLSTM, CRNNConfig, collate, prepare
 from doclens.ctc import greedy
 
 SMALL = {"channels": (8, 16, 32, 32), "hidden": 32}
@@ -21,7 +21,25 @@ def test_prepare_scales_to_height_and_stretches_contrast():
     assert prepare(np.zeros((10, 5000), np.uint8), 32, 1024).shape == (32, 1024)
 
 
-def test_columns_follow_the_width_and_packing_keeps_padding_out():
+def test_bilstm_is_a_bidirectional_lstm_and_padding_never_reaches_a_real_column():
+    torch.manual_seed(0)
+    ours = BiLSTM(8, 16, 2, dropout=0.0).eval()
+    ref = torch.nn.LSTM(8, 16, num_layers=2, bidirectional=True).eval()
+    with torch.no_grad():                       # the same weights, in PyTorch's own layout
+        for i in range(2):
+            for name in ("weight_ih", "weight_hh", "bias_ih", "bias_hh"):
+                getattr(ref, f"{name}_l{i}").copy_(getattr(ours.fwd[i], f"{name}_l0"))
+                getattr(ref, f"{name}_l{i}_reverse").copy_(getattr(ours.bwd[i], f"{name}_l0"))
+    x = torch.randn(12, 3, 8)
+    with torch.no_grad():
+        full = ours(x, torch.tensor([12, 12, 12]))
+        assert torch.allclose(full, ref(x)[0], atol=1e-5)          # no padding: exactly PyTorch's LSTM
+        short = ours(x, torch.tensor([12, 7, 12]))                   # sequence 1 ends after 7 columns
+        alone = ours(x[:7, 1:2], torch.tensor([7]))
+    assert torch.allclose(short[:7, 1], alone[:, 0], atol=1e-6)      # its 5 padded columns change nothing
+
+
+def test_columns_follow_the_width_and_a_wider_neighbour_barely_matters():
     torch.manual_seed(0)
     model = CRNN(CRNNConfig(n_classes=10, height=32, **SMALL)).eval()
     rng = np.random.default_rng(0)
@@ -29,15 +47,11 @@ def test_columns_follow_the_width_and_packing_keeps_padding_out():
     x, widths = collate([a, b])
     with torch.no_grad():
         logits, lengths = model(x, widths)
-        plain, _ = model(x, widths, packed=False)
         alone, _ = model(*collate([a]))
-    assert logits.shape == (50, 2, 10) and lengths.tolist() == [16, 50]
-    # Read next to a wider image, `a` is padded with paper. Without packing, the right to left LSTM
-    # crosses 34 columns of padding before reaching it; packed, it starts at a's own last column, and
-    # only the convolutions' borders still see the padding (a few pixels at the right edge).
-    packed_gap = (logits[:16, 0] - alone[:, 0]).abs().max()
-    plain_gap = (plain[:16, 0] - alone[:, 0]).abs().max()
-    assert packed_gap < 1e-3 and packed_gap < plain_gap / 10
+    assert x.shape[3] == 256 and logits.shape == (64, 2, 10) and lengths.tolist() == [16, 50]
+    # Next to a wider image, a is padded with paper. The LSTM never reads that padding; only the
+    # convolutions at a's right edge see it, through a few pixels.
+    assert (logits[:16, 0] - alone[:, 0]).abs().max() < 1e-3
 
 
 def test_checkpoint_round_trip(tmp_path):

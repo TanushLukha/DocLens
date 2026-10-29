@@ -53,7 +53,6 @@ def parse():
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--amp", choices=["off", "fp16", "bf16"], default="off")
-    ap.add_argument("--no-pack", action="store_true", help="run the LSTM over padding too")
     ap.add_argument("--ctc-on-device", action="store_true", help="CTC on the GPU instead of the CPU")
     ap.add_argument("--sources", nargs="+", choices=list(MIX), default=list(MIX), help="training sources to mix")
     ap.add_argument("--synthetic-only", action="store_true", help="the same as --sources lines")
@@ -190,7 +189,7 @@ def main():
             g["lr"] = lr
         x, widths = batch["x"].to(device), batch["widths"].to(device)
         with torch.autocast(device.type, dtype=amp_dtype) if amp_dtype else contextlib.nullcontext():
-            logits, lengths = model(x, widths, packed=not args.no_pack)
+            logits, lengths = model(x, widths)
         loss = crnn.ctc_loss(logits, lengths, batch["targets"], batch["target_lengths"], on_cpu=not args.ctc_on_device)
         opt.zero_grad(set_to_none=True)
         if scaler is not None:

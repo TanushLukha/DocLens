@@ -256,12 +256,20 @@ Why not a fixed width: it would squash long lines and stretch short words. Why n
 first: M1 showed global thresholding hurting under shadow. The benchmark (decision 24) times
 heights 32 and 48 before the long run.
 
-**21. Batches of similar width, and a packed LSTM.**
+**21. Batches of similar width, and an LSTM that never reads padding.**
 What: each data worker draws 8 batches' worth of samples, sorts them by width and cuts them into
-batches; the LSTM runs packed, stopping at each image's own end.
-Why: a batch costs as much as its widest image, so mixing words with long lines would waste most
-of the compute on padding; packing keeps that padding out of the right to left pass (a test
-measures what is left: a hair, from the convolutions' borders).
+batches; batch widths are rounded up to a multiple of 64 pixels. In each LSTM layer the left to
+right pass reads the padded batch as it is, and the right to left pass reads every line reversed
+within its own length, so for both the padding comes after the last real column.
+Why: a batch costs as much as its widest image, so mixing words with long lines would spend most
+of the compute on padding; the Apple GPU builds its compute graph once per tensor shape, so a few
+dozen widths run fast where a new width at every step would not. The first trial on the Mac used
+PyTorch's packed sequences for the LSTM and trained at 18 samples per second, an eighth of the
+benchmark's estimate: on 64 lines of 100 to 300 columns the packed LSTM takes 5.9 times as long as
+this one even on a CPU (`scripts/bench_m2.py` times both on the GPU). Why not let the LSTM run over
+the padding: a line next to a wider one would then read differently, since the right to left pass
+would cross the neighbour's padding first. A test checks that the two directions match PyTorch's
+own bidirectional LSTM exactly, and that padding changes no real column.
 
 **22. Optimisation.**
 What: AdamW at a learning rate of 0.001 with weight decay 0.0001, 1,000 warm up steps, cosine decay to 0.00001, gradients

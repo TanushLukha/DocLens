@@ -46,6 +46,39 @@ class CRNNConfig:
         return self.height * self.max_aspect
 
 
+class BiLSTM(nn.Module):
+    """A bidirectional LSTM whose right to left pass starts at each sequence's own end.
+
+    Each layer runs two plain LSTMs over the padded batch: one left to right on the sequences as
+    they are, one on every sequence reversed within its own length (the padding stays at the end),
+    whose output is then reversed back. Padding therefore comes last in both directions and never
+    reaches a real column, as with PyTorch's packed sequences; but a plain LSTM over a padded tensor
+    runs as one fused kernel, and the first trial with a packed one trained at an eighth of the
+    benchmark's estimate (decision 21 in docs/PLAN.md).
+    """
+
+    def __init__(self, inputs: int, hidden: int, layers: int, dropout: float):
+        super().__init__()
+        sizes = [inputs] + [2 * hidden] * (layers - 1)
+        self.fwd = nn.ModuleList(nn.LSTM(n, hidden) for n in sizes)
+        self.bwd = nn.ModuleList(nn.LSTM(n, hidden) for n in sizes)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        """x: T x B x features, lengths: real columns per sequence. Returns T x B x 2 hidden."""
+        t = torch.arange(x.size(0), device=x.device)[:, None]
+        n = lengths.to(x.device)[None, :]
+        idx = torch.where(t < n, n - 1 - t, t)[:, :, None]       # its own inverse
+        for i, (fwd, bwd) in enumerate(zip(self.fwd, self.bwd, strict=True)):
+            if i:
+                x = self.drop(x)
+            out_f, _ = fwd(x)
+            out_b, _ = bwd(x.gather(0, idx.expand(-1, -1, x.size(2))))
+            out_b = out_b.gather(0, idx.expand(-1, -1, out_b.size(2)))
+            x = torch.cat([out_f, out_b], dim=2)
+        return x
+
+
 def _conv(cin: int, cout: int, kernel=3, padding=1) -> list[nn.Module]:
     return [nn.Conv2d(cin, cout, kernel, padding=padding, bias=False), nn.BatchNorm2d(cout), nn.ReLU(inplace=True)]
 
@@ -65,25 +98,18 @@ class CRNN(nn.Module):
             *_conv(c3, c3, kernel=(cfg.height // 16, 1), padding=0),  # one row: a feature vector per column
         )
         self.drop = nn.Dropout(cfg.dropout)
-        self.rnn = nn.LSTM(c3, cfg.hidden, num_layers=cfg.layers, bidirectional=True,
-                           dropout=cfg.dropout if cfg.layers > 1 else 0.0)
+        self.rnn = BiLSTM(c3, cfg.hidden, cfg.layers, cfg.dropout)
         self.head = nn.Linear(2 * cfg.hidden, cfg.n_classes)
 
-    def forward(self, x: torch.Tensor, widths: torch.Tensor, packed: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, widths: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """x: B x 1 x H x W (padded on the right), widths: true widths in pixels.
-        Returns (logits T x B x C, columns per image)."""
+        Returns (logits T x B x C, columns per image).
+
+        The LSTM never sees an image's padding (see BiLSTM); only the convolutions' borders do, which
+        moves the scores by a hair (tests/test_crnn.py measures it)."""
         f = self.cnn(x).squeeze(2).permute(2, 0, 1)              # T x B x channels
         lengths = torch.clamp(torch.div(widths, DOWNSAMPLE, rounding_mode="floor"), 1, f.size(0))
-        f = self.drop(f)
-        if packed:
-            # The LSTM then starts and stops at each image's own end, so the right to left pass does
-            # not cross the padding of a wider neighbour first. Only the convolutions' borders still
-            # see that padding, which moves the scores by a hair (tests/test_crnn.py measures it).
-            seq = nn.utils.rnn.pack_padded_sequence(f, lengths.cpu(), enforce_sorted=False)
-            out, _ = self.rnn(seq)
-            out, _ = nn.utils.rnn.pad_packed_sequence(out, total_length=f.size(0))
-        else:
-            out, _ = self.rnn(f)
+        out = self.rnn(self.drop(f), lengths)
         return self.head(self.drop(out)), lengths
 
 
@@ -112,10 +138,17 @@ def prepare(img: np.ndarray, height: int, max_width: int) -> np.ndarray:
     return ((x - 0.5) / 0.5).astype(np.float32)
 
 
-def collate(images: list[np.ndarray]) -> tuple[torch.Tensor, torch.Tensor]:
-    """Prepared images into one padded batch (padding is paper: plus 1) and their widths."""
+BUCKET = 64                 # batch widths are rounded up to a multiple of this many pixels
+
+
+def collate(images: list[np.ndarray], bucket: int = BUCKET) -> tuple[torch.Tensor, torch.Tensor]:
+    """Prepared images into one padded batch (padding is paper: plus 1) and their widths.
+
+    The batch width is rounded up to a multiple of `bucket`: the Apple GPU builds its compute graph
+    once per tensor shape, so a few dozen shapes run fast where a new width at every step would not.
+    """
     h = images[0].shape[0]
-    w = max(im.shape[1] for im in images)
+    w = -(-max(im.shape[1] for im in images) // bucket) * bucket
     x = np.ones((len(images), 1, h, w), np.float32)
     for i, im in enumerate(images):
         x[i, 0, :, : im.shape[1]] = im

@@ -44,6 +44,6 @@ def test_batches_hold_images_of_similar_width_with_their_targets(tmp_path):
     for _ in range(4):
         b = next(stream)
         assert b["x"].shape[:3] == (4, 1, 32)
-        assert int(b["widths"].max()) == b["x"].shape[3]
+        assert int(b["widths"].max()) <= b["x"].shape[3] < int(b["widths"].max()) + 64 and b["x"].shape[3] % 64 == 0
         assert int(b["target_lengths"].sum()) == len(b["targets"]) and int(b["targets"].min()) >= 1
         assert sum(b["sources"].values()) == 4
