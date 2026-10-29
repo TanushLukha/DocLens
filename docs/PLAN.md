@@ -256,28 +256,39 @@ Why not a fixed width: it would squash long lines and stretch short words. Why n
 first: M1 showed global thresholding hurting under shadow. The benchmark (decision 24) times
 heights 32 and 48 before the long run.
 
-**21. Batches of similar width, and an LSTM that never reads padding.**
-What: each data worker draws 8 batches' worth of samples, sorts them by width and cuts them into
-batches; batch widths are rounded up to a multiple of 64 pixels. In each LSTM layer the left to
-right pass reads the padded batch as it is, and the right to left pass reads every line reversed
-within its own length, so for both the padding comes after the last real column.
-Why: a batch costs as much as its widest image, so mixing words with long lines would spend most
-of the compute on padding; the Apple GPU builds its compute graph once per tensor shape, so a few
-dozen widths run fast where a new width at every step would not. The first trial on the Mac used
-PyTorch's packed sequences for the LSTM and trained at 18 samples per second, an eighth of the
-benchmark's estimate: on 64 lines of 100 to 300 columns the packed LSTM takes 5.9 times as long as
-this one even on a CPU (`scripts/bench_m2.py` times both on the GPU). Why not let the LSTM run over
-the padding: a line next to a wider one would then read differently, since the right to left pass
-would cross the neighbour's padding first. A test checks that the two directions match PyTorch's
-own bidirectional LSTM exactly, and that padding changes no real column.
+**21. Batches by a pixel budget, and an LSTM that never reads padding.**
+What: each data worker draws 512 samples, sorts them by width and cuts them into batches that
+hold as many images as fit 32,768 pixel columns (images times width, the width rounded up to a
+multiple of 64): 256 words, or about 70 typical lines, or about 30 of the longest. Lines are at
+most 24 times as wide as they are high. In each LSTM layer the left to right pass reads the padded
+batch as it is, and the right to left pass reads every line reversed within its own length, so
+for both the padding comes after the last real column.
+Why: a batch costs as much as its widest image, so sorting by width spends little on padding. A
+budget instead of a fixed number of images keeps every step at about the same memory: one step on
+64 lines needs about 1.6 GB at the benchmark's typical line width but 5.5 GB at the widest lines,
+and the first full run on the Mac, with batches of 64, crawled at 18 to 30 samples per second
+where the benchmark promised about 290. On a 16 GB Mac that also holds the data workers, the widest
+batches running out of memory is the likely cause; the training log now prints GPU memory and swap
+in use, which shows it either way. The Apple GPU builds its compute
+graph once per tensor shape, so widths in steps of 64 run fast where a new width at every step
+would not. The LSTM: the first trial used PyTorch's packed sequences, which on the Mac took 4.7
+times as long as this LSTM (1,609 against 343 ms for 64 lines of 100 to 300 columns, forward and
+backward). Why not let the LSTM run over the padding: a line next to a wider one would read
+differently, since the right to left pass would cross the neighbour's padding first. Tests check
+that the two directions match PyTorch's own bidirectional LSTM exactly and that padding changes
+no real column.
 
 **22. Optimisation.**
-What: AdamW at a learning rate of 0.001 with weight decay 0.0001, 1,000 warm up steps, cosine decay to 0.00001, gradients
-clipped at 5, batches of 64, CTC computed on the CPU. Length and precision are set from the
-benchmark's numbers. A checkpoint every 1,000 steps; `--resume` continues from the last one.
-Why: the usual recipe for CRNNs; clipping guards the LSTM against rare large gradients. CTC on the
-CPU because its kernel exists on every PyTorch build, and it is a small part of a step (the
-benchmark checks the Apple GPU kernel and times both).
+What: AdamW at a learning rate of 0.001 with weight decay 0.0001, 1,000 warm up steps, cosine decay
+to 0.00001, gradients clipped at 5, 20,000 steps, full precision, CTC on the CPU, four data
+workers. Each image's loss is divided by its text length; the batch's losses are
+summed and divided by 64, so every image weighs the same whether it came in a batch of 30 lines or
+of 256 words. A checkpoint every 1,000 steps; `--resume` continues from the last one.
+Why: the usual recipe for CRNNs; clipping guards the LSTM against rare large gradients. Mixed
+precision bought nothing on the Mac's GPU (fp16 406 against 396 ms per step of lines, bf16 448), and
+CTC runs as fast on the CPU as on the GPU (396 against 393 ms), where its kernel exists on every
+PyTorch build. Four workers draw about 2,000 synthetic lines per second, far more than the GPU
+uses, and leave memory and cores to the training process.
 
 **23. Model selection on validation data only.**
 What: every 1,000 steps the model reads 2,000 Mozhi validation words, 901 synthetic validation
@@ -287,10 +298,14 @@ drawn with training fonts only (the held out fonts are never used to choose anyt
 Why: test sets are read once, at the end. Only 124 held out lines mix both scripts and the test
 sets took 117 of them, so mixed lines are measured on the test sets only.
 
-**24. A benchmark before the long run.**
-What: `scripts/bench_m2.py` checks that every piece of a step runs on the GPU and times training
-at heights 32 and 48, with and without mixed precision, plus the data workers' speed.
-Why: the run takes hours on a laptop; ten minutes of measurement choose its settings.
+**24. A benchmark before the long run, and a log that shows the machine.**
+What: `scripts/bench_m2.py` checks that every piece of a step runs on the GPU, compares the two
+LSTMs, times training steps on budget batches of words, lines and the longest lines at heights 32
+and 48 with the GPU memory each needs, and the data workers' speed. The training log prints
+samples per second, the average batch, GPU memory and swap every 100 steps.
+Why: the run takes hours on a laptop; minutes of measurement choose its settings. The first
+benchmark timed one line width only and missed what the widest batches cost; the log now shows it
+at once.
 
 **25. Decoding: greedy, beam search, then TinyGPT.**
 What: greedy decoding; prefix beam search with 10 candidates; the candidates rescored by

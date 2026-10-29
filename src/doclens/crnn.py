@@ -39,7 +39,7 @@ class CRNNConfig:
     hidden: int = 256
     layers: int = 2
     dropout: float = 0.2
-    max_aspect: int = 32            # wider images are squeezed to height * max_aspect pixels
+    max_aspect: int = 24            # wider images are squeezed to height * max_aspect pixels
 
     @property
     def max_width(self) -> int:
@@ -156,8 +156,9 @@ def collate(images: list[np.ndarray], bucket: int = BUCKET) -> tuple[torch.Tenso
 
 
 def ctc_loss(logits: torch.Tensor, lengths: torch.Tensor, targets: torch.Tensor, target_lengths: torch.Tensor,
-             on_cpu: bool = True) -> torch.Tensor:
-    """Mean CTC loss per image, each divided by its text length (PyTorch's "mean").
+             on_cpu: bool = True, per: float | None = None) -> torch.Tensor:
+    """CTC loss per character, averaged over the images of the batch, or with `per` summed over them
+    and divided by `per`: then every image weighs the same whatever the size of its batch.
 
     log_softmax runs where the model runs; the CTC sum itself runs on the CPU by default: it is a
     small dynamic programme, cheap next to the network, and the CPU kernel exists on every
@@ -166,7 +167,9 @@ def ctc_loss(logits: torch.Tensor, lengths: torch.Tensor, targets: torch.Tensor,
     logp = F.log_softmax(logits.float(), dim=-1)
     if on_cpu:
         logp, lengths, targets, target_lengths = logp.cpu(), lengths.cpu(), targets.cpu(), target_lengths.cpu()
-    return F.ctc_loss(logp, targets, lengths, target_lengths, blank=BLANK, reduction="mean", zero_infinity=True)
+    losses = F.ctc_loss(logp, targets, lengths, target_lengths, blank=BLANK, reduction="none", zero_infinity=True)
+    losses = losses / target_lengths.clamp(min=1).to(losses.dtype)
+    return losses.mean() if per is None else losses.sum() / per
 
 
 # devices and checkpoints

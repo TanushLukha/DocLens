@@ -5,12 +5,13 @@
 1. Checks that the GPU (Apple's MPS, or CUDA) runs every piece of a training step: the CRNN, CTC
    loss on the GPU (the CPU always works), and mixed precision in fp16 and bf16; then times the
    CRNN's LSTM (reversed within each length) against PyTorch's packed LSTM on lines of mixed length.
-2. Times training steps at input heights 32 and 48, on batches of word sized and of line sized
-   images, with and without mixed precision.
+2. Times training steps at input heights 32 and 48 on batches as training builds them (as many
+   images as fit 32,768 pixel columns): words, lines and the longest lines, with the GPU memory
+   each one needs.
 3. Times how fast one CPU worker draws training samples (rendering, damage, Mozhi crops).
 4. Estimates samples per second for the training mix and hours per million samples.
 
-Prints a report and saves nothing. Takes two to four minutes.
+Prints a report and saves nothing. Takes two to three minutes.
 """
 import argparse
 import contextlib
@@ -31,8 +32,9 @@ from doclens.alphabet import Alphabet  # noqa: E402
 from doclens.crnn import CRNN, BiLSTM, CRNNConfig  # noqa: E402
 from doclens.traindata import M2, Sources, Spec  # noqa: E402
 
-ASPECT = {"words": 2, "lines": 9}           # typical width / height: a word crop, a printed line
-CHARS = {"words": 4, "lines": 45}
+ASPECT = {"words": 2, "lines": 9, "long lines": 22}     # width / height: a word, a typical line, the longest
+CHARS = {"words": 4, "lines": 45, "long lines": 70}
+SHARE = {"words": 0.62, "lines": 0.33, "long lines": 0.05}   # of training samples (Mozhi, CORD words, spans)
 
 
 def sync(device):
@@ -40,6 +42,16 @@ def sync(device):
         torch.mps.synchronize()
     elif device.type == "cuda":
         torch.cuda.synchronize()
+
+
+def fitting(kind: str, height: int, columns: int, max_batch: int = 256) -> int:
+    """How many images of this kind a training batch holds (traindata.Sources.batches)."""
+    w = -(-height * ASPECT[kind] // crnn.BUCKET) * crnn.BUCKET
+    return max(1, min(max_batch, columns // w))
+
+
+def gpu_gb(device) -> float:
+    return torch.mps.driver_allocated_memory() / 1e9 if device.type == "mps" else float("nan")
 
 
 def batch(kind: str, height: int, n: int, classes: int, gen: torch.Generator):
@@ -124,7 +136,7 @@ def lstm_compare(device, steps=5):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="auto")
-    ap.add_argument("--batch", type=int, default=64)
+    ap.add_argument("--columns", type=int, default=32768, help="pixel columns per batch, as in training")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
     device = crnn.pick_device(args.device)
@@ -149,39 +161,38 @@ def main():
 
     lstm_compare(device)
 
-    print(f"\n2. training steps, batch {args.batch} (ms per step, samples per second)")
-    times = {}
-    print(f"{'height':>6} {'precision':>9} {'words (W=2H)':>18} {'lines (W=9H)':>18}  parameters")
+    print(f"\n2. training steps on batches of {args.columns:,} pixel columns, full precision"
+          " (images per batch, ms per step, samples per second, GPU memory)")
+    times: dict = {}
     for height in (32, 48):
-        for amp_name, dt in amps.items():
-            torch.manual_seed(0)
-            model = CRNN(CRNNConfig(n_classes=classes, height=height)).to(device)
-            opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
-            row = []
-            for kind in ("words", "lines"):
-                b = batch(kind, height, args.batch, classes, gen)
-                try:
-                    s = timed(model, opt, device, b, amp=dt)
-                    times[(height, amp_name, kind)] = s
-                    row.append(f"{1000 * s:7.0f} ms {args.batch / s:6.0f}/s")
-                except Exception as e:
-                    row.append(f"{'failed: ' + type(e).__name__:>18}")
-            print(f"{height:>6} {amp_name:>9} {row[0]:>18} {row[1]:>18}  {crnn.params(model):,}")
+        torch.manual_seed(0)
+        model = CRNN(CRNNConfig(n_classes=classes, height=height)).to(device)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        for kind in ASPECT:
+            n = fitting(kind, height, args.columns)
+            if device.type == "mps":
+                torch.mps.empty_cache()
+            try:
+                s = timed(model, opt, device, batch(kind, height, n, classes, gen))
+                times[(height, kind)] = s / n
+                print(f"height {height}  {kind:>10}: {n:3d} images  {1000 * s:5.0f} ms  {n / s:6.0f}/s"
+                      f"  {gpu_gb(device):5.1f} GB")
+            except Exception as e:
+                print(f"height {height}  {kind:>10}: failed: {type(e).__name__}: {str(e).splitlines()[0][:120]}")
     if ctc_dev:
         model = CRNN(CRNNConfig(n_classes=classes, height=48)).to(device)
         opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
-        b = batch("lines", 48, args.batch, classes, gen)
-        on_dev = timed(model, opt, device, b, ctc_on_cpu=False)
+        n = fitting("lines", 48, args.columns)
+        on_dev = timed(model, opt, device, batch("lines", 48, n, classes, gen), ctc_on_cpu=False)
         print(f"lines at 48 with CTC on the device: {1000 * on_dev:.0f} ms per step"
-              f" (CPU CTC: {1000 * times.get((48, 'off', 'lines'), float('nan')):.0f} ms)")
+              f" (CPU CTC: {1000 * n * times.get((48, 'lines'), float('nan')):.0f} ms)")
 
     print("\n3. one data worker (samples per second, rendering and damage on the CPU)")
     rates = {}
     if abc_file.exists():
         abc = Alphabet.load(abc_file)
         for source in ("lines", "mozhi"):
-            spec = Spec(alphabet="".join(abc.chars), height=48, max_width=48 * 32,
-                        weights={source: 1.0})
+            spec = Spec(alphabet="".join(abc.chars), height=48, max_width=48 * 24, weights={source: 1.0})
             try:
                 src = Sources(spec)
                 rng = np.random.default_rng(0)
@@ -195,17 +206,11 @@ def main():
     else:
         print("no data/m2/alphabet.json yet: run scripts/prepare_m2.py first")
 
-    print("\n4. estimate for the training mix (half lines of which a third are a few words, 30% Mozhi words, 20% CORD)")
+    print("\n4. estimate for the training mix (words 62%, lines 33%, the longest lines 5% of samples)")
     for height in (32, 48):
-        for amp_name in amps:
-            w, l = times.get((height, amp_name, "words")), times.get((height, amp_name, "lines"))
-            if not (w and l):
-                continue
-            share_lines = 0.5 * 0.65 + 0.2 * 0.4           # long images among all samples
-            per_sample = (share_lines * l + (1 - share_lines) * w) / args.batch
-            rate = 1 / per_sample
-            print(f"height {height}, {amp_name:>4}: about {rate:5.0f} samples/s on the device,"
-                  f" {1e6 / rate / 3600:4.1f} h per million samples")
+        if all((height, k) in times for k in ASPECT):
+            rate = 1 / sum(SHARE[k] * times[(height, k)] for k in ASPECT)
+            print(f"height {height}: about {rate:5.0f} samples/s on the device, {1e6 / rate / 3600:4.1f} h per million samples")
     if rates:
         print(f"one worker draws about {rates.get('lines', float('nan')):.0f} line samples/s; "
               "use enough workers to stay above the device's rate")

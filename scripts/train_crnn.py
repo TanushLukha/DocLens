@@ -15,6 +15,8 @@ import contextlib
 import json
 import math
 import platform
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -41,8 +43,9 @@ def parse():
     ap.add_argument("--height", type=int, default=48)
     ap.add_argument("--channels", type=int, nargs=4, default=[32, 64, 128, 256])
     ap.add_argument("--hidden", type=int, default=256)
-    ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--steps", type=int, default=30000)
+    ap.add_argument("--columns", type=int, default=32768, help="pixel columns per batch: images times width")
+    ap.add_argument("--max-batch", type=int, default=256)
+    ap.add_argument("--steps", type=int, default=20000)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--min-lr", type=float, default=1e-5)
     ap.add_argument("--warmup", type=int, default=1000)
@@ -50,7 +53,7 @@ def parse():
     ap.add_argument("--clip", type=float, default=5.0)
     ap.add_argument("--eval-every", type=int, default=1000)
     ap.add_argument("--log-every", type=int, default=100)
-    ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--device", default="auto")
     ap.add_argument("--amp", choices=["off", "fp16", "bf16"], default="off")
     ap.add_argument("--ctc-on-device", action="store_true", help="CTC on the GPU instead of the CPU")
@@ -62,7 +65,7 @@ def parse():
     ap.add_argument("--no-mlflow", action="store_true")
     args = ap.parse_args()
     if args.smoke:
-        args.steps, args.batch, args.eval_every, args.log_every, args.warmup = 60, 16, 30, 10, 10
+        args.steps, args.columns, args.max_batch, args.eval_every, args.log_every, args.warmup = 60, 4096, 32, 30, 10, 10
     return args
 
 
@@ -72,6 +75,24 @@ def lr_at(step: int, args) -> float:
         return args.lr * (step + 1) / args.warmup
     t = (step - args.warmup) / max(1, args.steps - args.warmup)
     return args.min_lr + 0.5 * (args.lr - args.min_lr) * (1 + math.cos(math.pi * min(t, 1.0)))
+
+
+def memory(device: torch.device) -> dict:
+    """GPU memory held by PyTorch, and on a Mac the swap in use: a run that swaps slows to a crawl."""
+    out = {}
+    if device.type == "mps":
+        out["gpu_gb"] = torch.mps.driver_allocated_memory() / 1e9
+    elif device.type == "cuda":
+        out["gpu_gb"] = torch.cuda.max_memory_allocated() / 1e9
+    if sys.platform == "darwin":
+        try:
+            text = subprocess.run(["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, timeout=2).stdout
+            used = re.search(r"used = ([\d.]+)M", text)
+            if used:
+                out["swap_gb"] = float(used.group(1)) / 1024
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return out
 
 
 def evaluate(model, alphabet, device, vals: dict, limit: int | None = None) -> dict:
@@ -145,7 +166,8 @@ def main():
             sys.exit("no CORD training crops: python scripts/get_data.py --only cord_train, then python scripts/prepare_m2.py"
                      " (or leave CORD out: --sources lines mozhi)")
         weights["cord"] = 0.0
-    spec = Spec(alphabet="".join(alphabet.chars), height=cfg.height, max_width=cfg.max_width, batch=args.batch,
+    spec = Spec(alphabet="".join(alphabet.chars), height=cfg.height, max_width=cfg.max_width, columns=args.columns,
+                max_batch=args.max_batch,
                 weights=weights, seed=args.seed)
 
     start, best = 0, float("inf")
@@ -173,10 +195,11 @@ def main():
           f" device {device}, amp {args.amp}; validation: {({k: len(v) for k, v in vals.items()})}")
 
     workers = 0 if args.smoke else args.workers
-    loader = DataLoader(Batches(spec, start_pool=start // spec.pool_batches), batch_size=None, num_workers=workers,
+    # a pool gives about 8 batches, so a resumed run starts near the pools it has not used yet
+    loader = DataLoader(Batches(spec, start_pool=start // 8), batch_size=None, num_workers=workers,
                         prefetch_factor=4 if workers else None, persistent_workers=False)
     stream = iter(loader)
-    log = open(out / "metrics.jsonl", "a", encoding="utf8")
+    log = open(out / "metrics.jsonl", "a" if args.resume else "w", encoding="utf8")    # a fresh run starts a fresh log
     amp_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}.get(args.amp)
     window = {"loss": 0.0, "n": 0, "samples": 0, "wait": 0.0, "t": time.time(), "sources": {}}
     model.train()
@@ -190,7 +213,9 @@ def main():
         x, widths = batch["x"].to(device), batch["widths"].to(device)
         with torch.autocast(device.type, dtype=amp_dtype) if amp_dtype else contextlib.nullcontext():
             logits, lengths = model(x, widths)
-        loss = crnn.ctc_loss(logits, lengths, batch["targets"], batch["target_lengths"], on_cpu=not args.ctc_on_device)
+        per = args.columns / 512            # as if 64 lines of 512 pixels: every image weighs the same
+        loss = crnn.ctc_loss(logits, lengths, batch["targets"], batch["target_lengths"], on_cpu=not args.ctc_on_device,
+                             per=per)
         opt.zero_grad(set_to_none=True)
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -202,7 +227,7 @@ def main():
             loss.backward()
             gnorm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             opt.step()
-        window["loss"] += float(loss.detach())
+        window["loss"] += float(loss.detach()) * per / len(batch["widths"])     # logged: the mean per image
         window["n"] += 1
         window["samples"] += len(batch["widths"])
         for k, v in batch["sources"].items():
@@ -213,13 +238,15 @@ def main():
             secs = time.time() - window["t"]
             rec = {"step": done, "loss": window["loss"] / window["n"], "lr": lr, "grad_norm": float(gnorm),
                    "samples_per_s": window["samples"] / secs, "data_wait": window["wait"] / secs,
-                   "sources": window["sources"]}
+                   "batch": window["samples"] / window["n"], **memory(device), "sources": window["sources"]}
             log.write(json.dumps(rec) + "\n")
             log.flush()
             tracker.metrics({k: rec[k] for k in ("loss", "lr", "grad_norm", "samples_per_s", "data_wait")}, done)
             eta = (args.steps - done) * secs / window["n"] / 60
+            mem = "".join(f"  {k[:-3]} {rec[k]:.1f} GB" for k in ("gpu_gb", "swap_gb") if k in rec)
             print(f"step {done:6d}  loss {rec['loss']:.3f}  lr {lr:.2e}  {rec['samples_per_s']:5.0f} samples/s"
-                  f"  data wait {100 * rec['data_wait']:3.0f}%  eta {eta:5.0f} min", flush=True)
+                  f"  batch {rec['batch']:4.0f}{mem}  data wait {100 * rec['data_wait']:3.0f}%  eta {eta:5.0f} min",
+                  flush=True)
             window = {"loss": 0.0, "n": 0, "samples": 0, "wait": 0.0, "t": time.time(), "sources": {}}
 
         if done % args.eval_every == 0 or done == args.steps:

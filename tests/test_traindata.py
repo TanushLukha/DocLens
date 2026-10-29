@@ -15,7 +15,7 @@ def spec(tmp_path, **kw) -> Spec:
     datasets.write_tsv(tmp_path / "lines.tsv", ["script", "text"], [list(r) for r in LINES])
     text = "".join(t for _, t in LINES)
     chars = sorted(set(text) | set(text.upper()) | set("0123456789.,Rpx "))
-    return Spec(alphabet="".join(chars), height=32, max_width=32 * 32, batch=4, pool_batches=2,
+    return Spec(alphabet="".join(chars), height=32, max_width=32 * 24, columns=2048, max_batch=8, pool=16,
                 weights={"lines": 1.0}, lines_file=str(tmp_path / "lines.tsv"), **kw)
 
 
@@ -39,11 +39,15 @@ def test_samples_are_drawn_the_same_way_for_the_same_seed(tmp_path):
     assert a[0].shape[0] == 32 and a[0].dtype == np.float32
 
 
-def test_batches_hold_images_of_similar_width_with_their_targets(tmp_path):
+def test_batches_fit_the_pixel_budget_and_carry_their_targets(tmp_path):
     stream = iter(Batches(spec(tmp_path)))
-    for _ in range(4):
+    sizes = []
+    for _ in range(8):
         b = next(stream)
-        assert b["x"].shape[:3] == (4, 1, 32)
-        assert int(b["widths"].max()) <= b["x"].shape[3] < int(b["widths"].max()) + 64 and b["x"].shape[3] % 64 == 0
+        n, _, h, w = b["x"].shape
+        sizes.append(n)
+        assert h == 32 and n == len(b["widths"]) == sum(b["sources"].values()) <= 8
+        assert n * w <= 2048 or n == 1                                   # the budget holds
+        assert int(b["widths"].max()) <= w < int(b["widths"].max()) + 64 and w % 64 == 0
         assert int(b["target_lengths"].sum()) == len(b["targets"]) and int(b["targets"].min()) >= 1
-        assert sum(b["sources"].values()) == 4
+    assert len(set(sizes)) > 1                     # short images come in bigger batches than long ones

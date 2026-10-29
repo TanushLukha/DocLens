@@ -13,8 +13,10 @@ never read here.
 
 Each DataLoader worker builds whole batches: it draws a pool of samples, sorts them by width
 and cuts the pool into batches, so a batch holds images of similar width and little compute is
-spent on padding. A pool's random generator is seeded by (seed, pool number), so the stream is
-the same on every run and a resumed run continues with pools it has not seen.
+spent on padding. A batch holds as many images as fit a budget of pixel columns (images times
+padded width): many words, or a few long lines, so every step needs about the same memory. A
+pool's random generator is seeded by (seed, pool number), so the stream is the same on every run
+and a resumed run continues with pools it has not seen.
 """
 from __future__ import annotations
 
@@ -29,7 +31,7 @@ from torch.utils.data import IterableDataset, get_worker_info
 
 from . import DATA, datasets, fonts
 from .alphabet import Alphabet
-from .crnn import DOWNSAMPLE, collate, prepare
+from .crnn import BUCKET, DOWNSAMPLE, collate, prepare
 from .degrade import CONDITIONS
 from .render import render_line
 
@@ -43,8 +45,9 @@ class Spec:
     alphabet: str
     height: int
     max_width: int
-    batch: int = 64
-    pool_batches: int = 8
+    columns: int = 32768          # pixel columns per batch: images times padded width
+    max_batch: int = 256
+    pool: int = 512               # samples drawn, sorted and cut into batches at a time
     weights: dict = field(default_factory=lambda: {"lines": 0.5, "mozhi": 0.3, "cord": 0.2})
     script_weights: dict = field(default_factory=lambda: {"deva": 0.5, "latn": 0.3, "mixed": 0.2})
     seed: int = 0
@@ -166,13 +169,19 @@ class Sources:
             return x, target, name
         raise RuntimeError("50 samples in a row did not fit: check the alphabet and the data")
 
-    def pool(self, rng: np.random.Generator):
+    def batches(self, rng: np.random.Generator):
         """Batches of similar width from one pool of samples, in random order."""
-        n = self.spec.batch * self.spec.pool_batches
-        samples = sorted((self.sample(rng) for _ in range(n)), key=lambda s: s[0].shape[1])
-        batches = [samples[i:i + self.spec.batch] for i in range(0, n, self.spec.batch)]
-        order = rng.permutation(len(batches))
-        for k in order:
+        samples = sorted((self.sample(rng) for _ in range(self.spec.pool)), key=lambda s: s[0].shape[1])
+        batches: list[list] = []
+        cur: list = []
+        for s in samples:                   # widths only grow, so the newest sample sets the batch width
+            width = -(-s[0].shape[1] // BUCKET) * BUCKET
+            if cur and ((len(cur) + 1) * width > self.spec.columns or len(cur) == self.spec.max_batch):
+                batches.append(cur)
+                cur = []
+            cur.append(s)
+        batches.append(cur)
+        for k in rng.permutation(len(batches)):
             yield make_batch(batches[int(k)])
 
 
@@ -206,7 +215,7 @@ class Batches(IterableDataset):
         src = Sources(self.spec)
         p = self.start_pool + wid
         while True:
-            yield from src.pool(np.random.default_rng([self.spec.seed, p]))
+            yield from src.batches(np.random.default_rng([self.spec.seed, p]))
             p += nw
 
 
