@@ -29,5 +29,8 @@ BUNDLE = REPO.parent / "TinyGPT" / "models" / "lm"
 def test_tinygpt_prefers_real_hindi():
     pytest.importorskip("tinygpt")
     scorer = lm.TinyGPTScorer(Path(BUNDLE))
-    good, bad = scorer.score(["भारत की राजधानी नई दिल्ली है।", "भारत की राजधनी नई दिल्ली है।"])
+    texts = ["भारत की राजधानी नई दिल्ली है।", "भारत की राजधनी नई दिल्ली है।", "kal subah 7 baje ka alarm"]
+    good, bad, hinglish = scorer.score(texts)
     assert good > bad
+    one_by_one = scorer.score(texts, batch_size=1)          # padding and batch size change nothing
+    assert all(abs(a - b) < 1e-3 for a, b in zip([good, bad, hinglish], one_by_one))

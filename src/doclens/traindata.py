@@ -11,12 +11,13 @@
 The test fonts, Mozhi's validation and test words and CORD's validation and test receipts are
 never read here.
 
-Each DataLoader worker builds whole batches: it draws a pool of samples, sorts them by width
-and cuts the pool into batches, so a batch holds images of similar width and little compute is
-spent on padding. A batch holds as many images as fit a budget of pixel columns (images times
-padded width): many words, or a few long lines, so every step needs about the same memory. A
-pool's random generator is seeded by (seed, pool number), so the stream is the same on every run
-and a resumed run continues with pools it has not seen.
+Each DataLoader worker builds whole batches from the samples it draws. Every sample goes to one
+of five width classes (crnn.width_classes), and a class's batch leaves when it holds its fixed
+number of images: as many as fit a budget of pixel columns (images times width), from 256 words
+to 28 of the longest lines. So training meets five tensor shapes only, every step needs about the
+same memory, and little compute is spent on padding. A pool's random generator is seeded by
+(seed, pool number), so the stream is the same on every run and a resumed run continues with
+pools it has not seen.
 """
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ from torch.utils.data import IterableDataset, get_worker_info
 
 from . import DATA, datasets, fonts
 from .alphabet import Alphabet
-from .crnn import BUCKET, DOWNSAMPLE, collate, prepare
+from .crnn import DOWNSAMPLE, collate, prepare, width_class, width_classes
 from .degrade import CONDITIONS
 from .render import render_line
 
@@ -47,7 +48,7 @@ class Spec:
     max_width: int
     columns: int = 32768          # pixel columns per batch: images times padded width
     max_batch: int = 256
-    pool: int = 512               # samples drawn, sorted and cut into batches at a time
+    pool: int = 512               # samples drawn with one seed
     weights: dict = field(default_factory=lambda: {"lines": 0.5, "mozhi": 0.3, "cord": 0.2})
     script_weights: dict = field(default_factory=lambda: {"deva": 0.5, "latn": 0.3, "mixed": 0.2})
     seed: int = 0
@@ -106,6 +107,9 @@ class Sources:
         p = np.array([w[k] for k in self.names], dtype=np.float64)
         self.p = p / p.sum()
         self.skipped = 0
+        self.classes = width_classes(spec.height)
+        self.sizes = {c: max(1, min(spec.max_batch, spec.columns // c)) for c in self.classes}
+        self.bins: dict[int, list] = {c: [] for c in self.classes}
 
     # one sample from each source: (uint8 image, text) or None
     def line(self, rng: np.random.Generator):
@@ -170,19 +174,14 @@ class Sources:
         raise RuntimeError("50 samples in a row did not fit: check the alphabet and the data")
 
     def batches(self, rng: np.random.Generator):
-        """Batches of similar width from one pool of samples, in random order."""
-        samples = sorted((self.sample(rng) for _ in range(self.spec.pool)), key=lambda s: s[0].shape[1])
-        batches: list[list] = []
-        cur: list = []
-        for s in samples:                   # widths only grow, so the newest sample sets the batch width
-            width = -(-s[0].shape[1] // BUCKET) * BUCKET
-            if cur and ((len(cur) + 1) * width > self.spec.columns or len(cur) == self.spec.max_batch):
-                batches.append(cur)
-                cur = []
-            cur.append(s)
-        batches.append(cur)
-        for k in rng.permutation(len(batches)):
-            yield make_batch(batches[int(k)])
+        """Full batches, each of one width class and its fixed size; part filled bins carry over."""
+        for _ in range(self.spec.pool):
+            s = self.sample(rng)
+            c = width_class(s[0].shape[1], self.classes)
+            self.bins[c].append(s)
+            if len(self.bins[c]) == self.sizes[c]:
+                yield make_batch(self.bins[c], c)
+                self.bins[c] = []
 
 
 def fits(columns: int, target: list[int]) -> bool:
@@ -191,8 +190,8 @@ def fits(columns: int, target: list[int]) -> bool:
     return 0 < len(target) and len(target) + repeats <= columns
 
 
-def make_batch(samples) -> dict:
-    x, widths = collate([s[0] for s in samples])
+def make_batch(samples, width: int | None = None) -> dict:
+    x, widths = collate([s[0] for s in samples], width)
     targets = torch.tensor([c for s in samples for c in s[1]], dtype=torch.long)
     lengths = torch.tensor([len(s[1]) for s in samples], dtype=torch.long)
     sources: dict[str, int] = {}

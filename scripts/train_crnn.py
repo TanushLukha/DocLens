@@ -78,10 +78,12 @@ def lr_at(step: int, args) -> float:
 
 
 def memory(device: torch.device) -> dict:
-    """GPU memory held by PyTorch, and on a Mac the swap in use: a run that swaps slows to a crawl."""
+    """GPU memory (all of it, and the part in PyTorch's tensors) and on a Mac the swap in use: a run
+    that swaps slows to a crawl, and memory that keeps growing ends in an out of memory error."""
     out = {}
     if device.type == "mps":
         out["gpu_gb"] = torch.mps.driver_allocated_memory() / 1e9
+        out["tensors_gb"] = torch.mps.current_allocated_memory() / 1e9
     elif device.type == "cuda":
         out["gpu_gb"] = torch.cuda.max_memory_allocated() / 1e9
     if sys.platform == "darwin":
@@ -243,7 +245,7 @@ def main():
             log.flush()
             tracker.metrics({k: rec[k] for k in ("loss", "lr", "grad_norm", "samples_per_s", "data_wait")}, done)
             eta = (args.steps - done) * secs / window["n"] / 60
-            mem = "".join(f"  {k[:-3]} {rec[k]:.1f} GB" for k in ("gpu_gb", "swap_gb") if k in rec)
+            mem = "".join(f"  {k[:-3]} {rec[k]:.1f} GB" for k in ("gpu_gb", "tensors_gb", "swap_gb") if k in rec)
             print(f"step {done:6d}  loss {rec['loss']:.3f}  lr {lr:.2e}  {rec['samples_per_s']:5.0f} samples/s"
                   f"  batch {rec['batch']:4.0f}{mem}  data wait {100 * rec['data_wait']:3.0f}%  eta {eta:5.0f} min",
                   flush=True)
@@ -251,6 +253,8 @@ def main():
 
         if done % args.eval_every == 0 or done == args.steps:
             res = evaluate(model, alphabet, device, vals, limit)
+            if device.type == "mps":
+                torch.mps.empty_cache()             # give back what the reading batches used
             mean = sum(r["cer"] for r in res.values()) / max(len(res), 1) if res else float("inf")
             improved = mean < best
             best = min(best, mean)

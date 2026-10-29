@@ -41,15 +41,18 @@ class TinyGPTScorer:
 
     @torch.no_grad()
     def score(self, texts: Sequence[str], batch_size: int = 128) -> list[float]:
-        """Natural log probability of each text, read after an end of text token (a fresh document)."""
+        """Natural log probability of each text, read after an end of text token (a fresh document).
+
+        Batches always hold batch_size rows and a multiple of 16 tokens (padding is masked out), so
+        the Apple GPU meets a handful of shapes, as in recognize.py."""
         ids = [[self.tok.eot_id] + self.tok.encode(t, allowed_special="none")[: self.block - 1] for t in texts]
         order = sorted(range(len(ids)), key=lambda i: len(ids[i]))
         out = [0.0] * len(ids)
         for s in range(0, len(order), batch_size):
             idx = order[s:s + batch_size]
-            n = max(len(ids[i]) for i in idx)
-            x = torch.full((len(idx), n), self.tok.eot_id, dtype=torch.long)
-            mask = torch.zeros((len(idx), n - 1), dtype=torch.bool)
+            n = min(self.block, -(-max(len(ids[i]) for i in idx) // 16) * 16)
+            x = torch.full((batch_size, n), self.tok.eot_id, dtype=torch.long)
+            mask = torch.zeros((batch_size, n - 1), dtype=torch.bool)
             for j, i in enumerate(idx):
                 x[j, : len(ids[i])] = torch.tensor(ids[i])
                 mask[j, : len(ids[i]) - 1] = True

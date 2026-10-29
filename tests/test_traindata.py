@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from doclens import datasets
+from doclens.crnn import width_classes
 from doclens.traindata import Batches, Sources, Spec, fits, number_text
 
 pytestmark = pytest.mark.skipif(not __import__("PIL.features").features.check("raqm"),
@@ -39,15 +40,17 @@ def test_samples_are_drawn_the_same_way_for_the_same_seed(tmp_path):
     assert a[0].shape[0] == 32 and a[0].dtype == np.float32
 
 
-def test_batches_fit_the_pixel_budget_and_carry_their_targets(tmp_path):
+def test_batches_come_in_five_fixed_shapes_and_carry_their_targets(tmp_path):
+    classes = width_classes(32)                                       # 128, 192, 384, 512, 768
+    size = {c: min(8, 2048 // c) for c in classes}                    # 8, 8, 5, 4, 2 images
     stream = iter(Batches(spec(tmp_path)))
-    sizes = []
-    for _ in range(8):
+    shapes = set()
+    for _ in range(12):
         b = next(stream)
         n, _, h, w = b["x"].shape
-        sizes.append(n)
-        assert h == 32 and n == len(b["widths"]) == sum(b["sources"].values()) <= 8
-        assert n * w <= 2048 or n == 1                                   # the budget holds
-        assert int(b["widths"].max()) <= w < int(b["widths"].max()) + 64 and w % 64 == 0
+        shapes.add((n, w))
+        assert h == 32 and w in classes and n == size[w] == len(b["widths"]) == sum(b["sources"].values())
+        narrower = ([0] + classes)[classes.index(w)]
+        assert narrower < int(b["widths"].min()) and int(b["widths"].max()) <= w     # each image in its class
         assert int(b["target_lengths"].sum()) == len(b["targets"]) and int(b["targets"].min()) >= 1
-    assert len(set(sizes)) > 1                     # short images come in bigger batches than long ones
+    assert len(shapes) > 1

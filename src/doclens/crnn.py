@@ -138,17 +138,35 @@ def prepare(img: np.ndarray, height: int, max_width: int) -> np.ndarray:
     return ((x - 0.5) / 0.5).astype(np.float32)
 
 
-BUCKET = 64                 # batch widths are rounded up to a multiple of this many pixels
+BUCKET = 64                         # widths are rounded up to a multiple of this many pixels
+ASPECTS = (8 / 3, 16 / 3, 32 / 3, 16, 24)     # the five width classes, as multiples of the height
 
 
-def collate(images: list[np.ndarray], bucket: int = BUCKET) -> tuple[torch.Tensor, torch.Tensor]:
-    """Prepared images into one padded batch (padding is paper: plus 1) and their widths.
+def width_classes(height: int) -> list[int]:
+    """Five fixed batch widths (128, 256, 512, 768 and 1152 pixels at height 48).
 
-    The batch width is rounded up to a multiple of `bucket`: the Apple GPU builds its compute graph
-    once per tensor shape, so a few dozen shapes run fast where a new width at every step would not.
+    PyTorch's Apple GPU backend compiles and keeps a graph for every tensor shape it meets. Batches
+    cut by a pixel budget alone came in 83 shapes over the first 250 steps, and the first full run
+    ran out of GPU memory with 17.5 GiB held outside PyTorch's tensors. Training and reading
+    therefore use these five widths, each with a fixed number of images: ten shapes in all
+    (decision 21 in docs/PLAN.md).
     """
+    return sorted({-(-round(a * height) // BUCKET) * BUCKET for a in ASPECTS})
+
+
+def width_class(width: int, classes: list[int]) -> int:
+    """The narrowest class that holds an image this wide."""
+    return next((c for c in classes if width <= c), classes[-1])
+
+
+def collate(images: list[np.ndarray], width: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    """Prepared images into one batch, padded on the right with paper (plus 1) to `width` pixels, or
+    to the widest image rounded up to a multiple of BUCKET; and the images' own widths."""
     h = images[0].shape[0]
-    w = -(-max(im.shape[1] for im in images) // bucket) * bucket
+    need = max(im.shape[1] for im in images)
+    w = width if width is not None else -(-need // BUCKET) * BUCKET
+    if w < need:
+        raise ValueError(f"batch width {w} is narrower than an image ({need})")
     x = np.ones((len(images), 1, h, w), np.float32)
     for i, im in enumerate(images):
         x[i, 0, :, : im.shape[1]] = im

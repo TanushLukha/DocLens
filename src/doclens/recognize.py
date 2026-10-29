@@ -1,7 +1,8 @@
 """Reading crops with a trained CRNN: batching, the network, then greedy or beam decoding.
 
-Images are sorted by width before batching, so each batch holds crops of similar width, and
-results come back in the order the images were given.
+Each image goes to its width class (crnn.width_classes) and is read in a batch of that width and a
+fixed size, the last batch of a class filled with blank images, so the GPU meets five shapes only.
+Results come back in the order the images were given.
 """
 from __future__ import annotations
 
@@ -29,15 +30,28 @@ class Recognizer:
 
     @torch.no_grad()
     def logprobs(self, images: Sequence[np.ndarray], batch_size: int = 64) -> Iterator[tuple[int, np.ndarray]]:
-        """(index, T x C log probabilities) for every image, in batches of similar width."""
-        order = sorted(range(len(images)), key=lambda i: images[i].shape[1] / max(images[i].shape[0], 1))
-        for s in range(0, len(order), batch_size):
-            idx = order[s:s + batch_size]
-            x, widths = crnn.collate([crnn.prepare(images[i], self.height, self.max_width) for i in idx])
-            logits, lengths = self.model(x.to(self.device), widths.to(self.device))
-            logp = F.log_softmax(logits.float(), dim=-1).cpu().numpy()
-            for j, i in enumerate(idx):
-                yield i, logp[: int(lengths[j]), j]
+        """(index, T x C log probabilities) for every image."""
+        classes = crnn.width_classes(self.height)
+        groups: dict[int, list[tuple[int, np.ndarray]]] = {c: [] for c in classes}
+        for i, im in enumerate(images):
+            x = crnn.prepare(im, self.height, self.max_width)
+            c = crnn.width_class(x.shape[1], classes)
+            groups[c].append((i, x))
+            if len(groups[c]) == batch_size:
+                yield from self._run(groups[c], c, batch_size)
+                groups[c] = []
+        for c, rest in groups.items():
+            if rest:
+                yield from self._run(rest, c, batch_size)
+
+    def _run(self, batch: list[tuple[int, np.ndarray]], width: int, batch_size: int):
+        blank = np.ones((self.height, crnn.DOWNSAMPLE * 2), np.float32)
+        images = [x for _, x in batch] + [blank] * (batch_size - len(batch))
+        x, widths = crnn.collate(images, width)
+        logits, lengths = self.model(x.to(self.device), widths.to(self.device))
+        logp = F.log_softmax(logits.float(), dim=-1).cpu().numpy()
+        for j, (i, _) in enumerate(batch):
+            yield i, logp[: int(lengths[j]), j]
 
     def _each(self, images, decode: Callable[[np.ndarray], object], batch_size: int) -> list:
         out: list = [None] * len(images)

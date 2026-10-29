@@ -248,7 +248,7 @@ to read through it. Why not a fixed, pre rendered training set: every pass would
 pixels; drawing fresh costs CPU time, which the data workers spend while the GPU trains.
 
 **20. Images 48 pixels high, aspect kept, contrast stretched.**
-What: each crop is scaled to 48 pixels high (lines up to 32 times as wide), then its 2nd
+What: each crop is scaled to 48 pixels high (lines up to 24 times as wide), then its 2nd
 percentile (ink) maps to minus 1 and its 98th (paper) to plus 1.
 Why: Devanagari puts marks above and below the headline; Mozhi's crops are 48 pixels high, so they
 keep their resolution. The stretch puts faded thermal print and dark shadowed scans on one scale.
@@ -256,33 +256,43 @@ Why not a fixed width: it would squash long lines and stretch short words. Why n
 first: M1 showed global thresholding hurting under shadow. The benchmark (decision 24) times
 heights 32 and 48 before the long run.
 
-**21. Batches by a pixel budget, and an LSTM that never reads padding.**
-What: each data worker draws 512 samples, sorts them by width and cuts them into batches that
-hold as many images as fit 32,768 pixel columns (images times width, the width rounded up to a
-multiple of 64): 256 words, or about 70 typical lines, or about 30 of the longest. Lines are at
-most 24 times as wide as they are high. In each LSTM layer the left to right pass reads the padded
-batch as it is, and the right to left pass reads every line reversed within its own length, so
-for both the padding comes after the last real column.
-Why: a batch costs as much as its widest image, so sorting by width spends little on padding. A
-budget instead of a fixed number of images keeps every step at about the same memory: one step on
-64 lines needs about 1.6 GB at the benchmark's typical line width but 5.5 GB at the widest lines,
-and the first full run on the Mac, with batches of 64, crawled at 18 to 30 samples per second
-where the benchmark promised about 290. On a 16 GB Mac that also holds the data workers, the widest
-batches running out of memory is the likely cause; the training log now prints GPU memory and swap
-in use, which shows it either way. The Apple GPU builds its compute
-graph once per tensor shape, so widths in steps of 64 run fast where a new width at every step
-would not. The LSTM: the first trial used PyTorch's packed sequences, which on the Mac took 4.7
-times as long as this LSTM (1,609 against 343 ms for 64 lines of 100 to 300 columns, forward and
-backward). Why not let the LSTM run over the padding: a line next to a wider one would read
-differently, since the right to left pass would cross the neighbour's padding first. Tests check
-that the two directions match PyTorch's own bidirectional LSTM exactly and that padding changes
-no real column.
+**21. Five fixed batch shapes, and an LSTM that never reads padding.**
+What: every image goes to the narrowest of five width classes that holds it, 128, 256, 512, 768
+and 1,152 pixels at height 48, and is padded to that width. A training batch holds a fixed number
+of images for its class, as many as fit 32,768 pixel columns, at most 256: 256, 128, 64, 42 and
+28. Each data worker keeps a bin per class and sends a batch when a bin is full. Reading uses the
+same five widths in batches of 64, the last one filled with blank images, and TinyGPT scores
+candidates in batches of a fixed number of rows, with lengths rounded up to 16 tokens. Lines are
+at most 24 times as wide as they are high. In each LSTM layer the left to right pass reads the
+padded batch as it is, and the right to left pass reads every line reversed within its own length,
+so for both the padding comes after the last real column.
+Why: PyTorch's Apple GPU backend compiles and keeps a graph for every tensor shape it meets. The
+first full run cut batches from sorted pools by the pixel budget alone, so they came in many sizes
+and widths: a simulation of that batching with the run's settings gives 83 shapes in the first 250
+steps, and a mean batch of 86 images, as the run's log showed. GPU memory reached 19.3 GB by step
+100 with 25 GB of swap in use, the run crawled at 58 to 73 samples per second, and before step 300
+it stopped with "MPS backend out of memory": 2.45 GiB in PyTorch's tensors, 17.52 GiB in other
+allocations. Five classes leave ten shapes in all, five for training and five for reading, and the
+budget still gives every training step about the same memory and time. Padding barely changes:
+28.0% of the pixel columns, against 26.5% for batches cut from sorted pools (the same simulation,
+8,192 samples). `scripts/bench_m2.py` follows GPU memory over 100 steps on the five shapes and
+over 16 steps on new ones.
+Why not more classes: each adds two shapes to build and keep. Why not fewer: they pad more; with
+one width of 1,152 pixels, nine tenths of a batch of words would be padding. Why not a fixed
+number of images at any width: the run before, with batches of 64, crawled at 18 to 30 samples per
+second, and one step on 64 of the widest lines needs 5.5 GB where 64 typical lines need 1.6 GB.
+The LSTM: the first trial used PyTorch's packed sequences, which on the Mac took 4.7 times as long
+as this LSTM (1,609 against 343 ms for 64 lines of 100 to 300 columns, forward and backward). Why
+not let the LSTM run over the padding: a line next to a wider one would read differently, since the
+right to left pass would cross the neighbour's padding first. Tests check that the two directions
+match PyTorch's own bidirectional LSTM exactly, that padding changes no real column, and that
+reading in batches filled with blanks gives the same scores as reading each image alone.
 
 **22. Optimisation.**
 What: AdamW at a learning rate of 0.001 with weight decay 0.0001, 1,000 warm up steps, cosine decay
 to 0.00001, gradients clipped at 5, 20,000 steps, full precision, CTC on the CPU, four data
 workers. Each image's loss is divided by its text length; the batch's losses are
-summed and divided by 64, so every image weighs the same whether it came in a batch of 30 lines or
+summed and divided by 64, so every image weighs the same whether it came in a batch of 28 lines or
 of 256 words. A checkpoint every 1,000 steps; `--resume` continues from the last one.
 Why: the usual recipe for CRNNs; clipping guards the LSTM against rare large gradients. Mixed
 precision bought nothing on the Mac's GPU (fp16 406 against 396 ms per step of lines, bf16 448), and
@@ -300,12 +310,14 @@ sets took 117 of them, so mixed lines are measured on the test sets only.
 
 **24. A benchmark before the long run, and a log that shows the machine.**
 What: `scripts/bench_m2.py` checks that every piece of a step runs on the GPU, compares the two
-LSTMs, times training steps on budget batches of words, lines and the longest lines at heights 32
-and 48 with the GPU memory each needs, and the data workers' speed. The training log prints
-samples per second, the average batch, GPU memory and swap every 100 steps.
+LSTMs, times training steps on batches of words, lines and the longest lines at heights 32 and 48
+with the GPU memory each needs, measures the data workers' speed, then follows GPU memory over 100
+steps on the five batch shapes and over 16 steps on new shapes. The training log prints samples
+per second, the average batch, GPU memory (all of it, and the part in tensors) and swap every 100
+steps.
 Why: the run takes hours on a laptop; minutes of measurement choose its settings. The first
-benchmark timed one line width only and missed what the widest batches cost; the log now shows it
-at once.
+benchmarks timed one batch shape at a time, so they could not show memory growing with the number
+of shapes; the full run showed it, and now the benchmark does too.
 
 **25. Decoding: greedy, beam search, then TinyGPT.**
 What: greedy decoding; prefix beam search with 10 candidates; the candidates rescored by

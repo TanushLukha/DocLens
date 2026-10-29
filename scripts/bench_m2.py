@@ -5,13 +5,17 @@
 1. Checks that the GPU (Apple's MPS, or CUDA) runs every piece of a training step: the CRNN, CTC
    loss on the GPU (the CPU always works), and mixed precision in fp16 and bf16; then times the
    CRNN's LSTM (reversed within each length) against PyTorch's packed LSTM on lines of mixed length.
-2. Times training steps at input heights 32 and 48 on batches as training builds them (as many
-   images as fit 32,768 pixel columns): words, lines and the longest lines, with the GPU memory
-   each one needs.
+2. Times training steps at input heights 32 and 48 on batches as training builds them (one width
+   class, as many images as fit 32,768 pixel columns): words, lines and the longest lines, with
+   the GPU memory each one needs.
 3. Times how fast one CPU worker draws training samples (rendering, damage, Mozhi crops).
 4. Estimates samples per second for the training mix and hours per million samples.
+5. Trains 100 steps at height 48 on the five batch shapes training uses, then reads one batch of
+   each width as validation does, and shows whether GPU memory settles or keeps growing.
+6. Trains 16 more steps, each on a batch of a shape not seen before (as the first run's batching
+   made them), to show what new shapes cost in GPU memory.
 
-Prints a report and saves nothing. Takes two to three minutes.
+Prints a report and saves nothing. Takes three to four minutes.
 """
 import argparse
 import contextlib
@@ -44,23 +48,38 @@ def sync(device):
         torch.cuda.synchronize()
 
 
-def fitting(kind: str, height: int, columns: int, max_batch: int = 256) -> int:
-    """How many images of this kind a training batch holds (traindata.Sources.batches)."""
-    w = -(-height * ASPECT[kind] // crnn.BUCKET) * crnn.BUCKET
-    return max(1, min(max_batch, columns // w))
+def fitting(kind: str, height: int, columns: int, max_batch: int = 256) -> tuple[int, int]:
+    """(width class, images per batch) for this kind, as traindata.Sources.batches builds them."""
+    w = crnn.width_class(height * ASPECT[kind], crnn.width_classes(height))
+    return w, max(1, min(max_batch, columns // w))
 
 
 def gpu_gb(device) -> float:
     return torch.mps.driver_allocated_memory() / 1e9 if device.type == "mps" else float("nan")
 
 
-def batch(kind: str, height: int, n: int, classes: int, gen: torch.Generator):
-    w = height * ASPECT[kind]
+def batch(kind: str, height: int, n: int, classes: int, gen: torch.Generator, width: int | None = None):
+    w = width or height * ASPECT[kind]
     x = torch.randn(n, 1, height, w, generator=gen)
-    widths = torch.full((n,), w, dtype=torch.long)
+    widths = torch.full((n,), min(w, height * ASPECT[kind]), dtype=torch.long)
     targets = torch.randint(1, classes, (n * CHARS[kind],), generator=gen)
     lengths = torch.full((n,), CHARS[kind], dtype=torch.long)
     return x, widths, targets, lengths
+
+
+def class_batch(width: int, n: int, narrower: int, height: int, classes: int, gen: torch.Generator):
+    """A batch of one width class as training makes it: n images padded to `width` pixels, each wider
+    than the class below, with as many characters as a line of its width holds."""
+    x = torch.randn(n, 1, height, width, generator=gen)
+    widths = torch.randint(max(narrower + 1, 2 * crnn.DOWNSAMPLE), width + 1, (n,), generator=gen)
+    lengths = torch.clamp(widths // crnn.DOWNSAMPLE // 3, min=1)
+    targets = torch.randint(1, classes, (int(lengths.sum()),), generator=gen)
+    return x, widths, targets, lengths
+
+
+def memory_line(label: str, device) -> str:
+    return (f"{label}: {gpu_gb(device):5.1f} GB on the GPU,"
+            f" {torch.mps.current_allocated_memory() / 1e9:4.1f} GB of it in tensors")
 
 
 def step_fn(model, opt, device, b, amp=None, ctc_on_cpu=True):
@@ -169,11 +188,11 @@ def main():
         model = CRNN(CRNNConfig(n_classes=classes, height=height)).to(device)
         opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
         for kind in ASPECT:
-            n = fitting(kind, height, args.columns)
+            w, n = fitting(kind, height, args.columns)
             if device.type == "mps":
                 torch.mps.empty_cache()
             try:
-                s = timed(model, opt, device, batch(kind, height, n, classes, gen))
+                s = timed(model, opt, device, batch(kind, height, n, classes, gen, w))
                 times[(height, kind)] = s / n
                 print(f"height {height}  {kind:>10}: {n:3d} images  {1000 * s:5.0f} ms  {n / s:6.0f}/s"
                       f"  {gpu_gb(device):5.1f} GB")
@@ -182,8 +201,8 @@ def main():
     if ctc_dev:
         model = CRNN(CRNNConfig(n_classes=classes, height=48)).to(device)
         opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
-        n = fitting("lines", 48, args.columns)
-        on_dev = timed(model, opt, device, batch("lines", 48, n, classes, gen), ctc_on_cpu=False)
+        w, n = fitting("lines", 48, args.columns)
+        on_dev = timed(model, opt, device, batch("lines", 48, n, classes, gen, w), ctc_on_cpu=False)
         print(f"lines at 48 with CTC on the device: {1000 * on_dev:.0f} ms per step"
               f" (CPU CTC: {1000 * n * times.get((48, 'lines'), float('nan')):.0f} ms)")
 
@@ -215,6 +234,49 @@ def main():
         print(f"one worker draws about {rates.get('lines', float('nan')):.0f} line samples/s; "
               "use enough workers to stay above the device's rate")
 
+    if device.type == "mps":
+        print("\n5. GPU memory on the five batch shapes of training, height 48")
+        torch.manual_seed(0)
+        model = CRNN(CRNNConfig(n_classes=classes, height=48)).to(device)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+        torch.mps.empty_cache()
+        print(memory_line("before training", device))
+        widths = crnn.width_classes(48)
+        shapes = [(c, max(1, min(256, args.columns // c)), lo) for c, lo in zip(widths, [0] + widths[:-1], strict=True)]
+        t = 0.0
+        for step in range(1, 101):
+            c, n, lo = shapes[step % len(shapes)]
+            step_fn(model, opt, device, class_batch(c, n, lo, 48, classes, gen))
+            if step == 50:
+                sync(device)
+                t = time.perf_counter()
+            if step in (10, 25, 50, 100):
+                sync(device)
+                print(memory_line(f"after {step:3d} steps", device))
+        print(f"steps 51 to 100: {(time.perf_counter() - t) / 50 * 1000:.0f} ms per step")
+        model.eval()
+        with torch.no_grad():
+            for c, _, lo in shapes:
+                x, w, _, _ = class_batch(c, 64, lo, 48, classes, gen)
+                model(x.to(device), w.to(device))
+        model.train()
+        sync(device)
+        print(memory_line("after reading 64 images of each width, as validation does", device))
+
+        print("\n6. the same model, 16 more steps, each on a batch of a new shape (as the first run's batching made)")
+        rng = np.random.default_rng(0)
+        seen = {(n, c) for c, n, _ in shapes}
+        for step in range(1, 17):
+            while True:
+                w = int(rng.integers(2, 19)) * crnn.BUCKET
+                n = int(rng.integers(1, min(256, args.columns // w) + 1))
+                if (n, w) not in seen:
+                    break
+            seen.add((n, w))
+            step_fn(model, opt, device, class_batch(w, n, 0, 48, classes, gen))
+            if step % 4 == 0:
+                sync(device)
+                print(memory_line(f"after {step:2d} new shapes", device))
 
 if __name__ == "__main__":
     main()

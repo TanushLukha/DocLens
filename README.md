@@ -160,7 +160,7 @@ src/doclens/
   crnn.py         the CRNN, its input preparation, CTC loss, checkpoints
   traindata.py    training batches drawn fresh: synthetic lines, Mozhi words, CORD crops
   ctc.py          greedy decoding, prefix beam search, exact CTC probability
-  recognize.py    reading crops with a trained model, in batches of similar width
+  recognize.py    reading crops with a trained model, in five fixed batch shapes
   lm.py           TinyGPT rescoring, and choosing its weights on validation data
   stats.py        bootstrap intervals and paired comparisons
 scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh,

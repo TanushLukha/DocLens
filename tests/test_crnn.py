@@ -6,6 +6,7 @@ from doclens import crnn, fonts
 from doclens.alphabet import Alphabet
 from doclens.crnn import CRNN, BiLSTM, CRNNConfig, collate, prepare
 from doclens.ctc import greedy
+from doclens.recognize import Recognizer
 
 SMALL = {"channels": (8, 16, 32, 32), "hidden": 32}
 
@@ -52,6 +53,30 @@ def test_columns_follow_the_width_and_a_wider_neighbour_barely_matters():
     # Next to a wider image, a is padded with paper. The LSTM never reads that padding; only the
     # convolutions at a's right edge see it, through a few pixels.
     assert (logits[:16, 0] - alone[:, 0]).abs().max() < 1e-3
+
+
+def test_width_classes_and_collate_to_a_class_width():
+    assert crnn.width_classes(48) == [128, 256, 512, 768, 1152]
+    assert crnn.width_class(129, [128, 256]) == 256 and crnn.width_class(5000, [128, 256]) == 256
+    x, widths = collate([np.zeros((32, 40), np.float32)], 128)
+    assert x.shape == (1, 1, 32, 128) and widths.tolist() == [40] and float(x[0, 0, 0, 40:].min()) == 1.0
+    with pytest.raises(ValueError):
+        collate([np.zeros((32, 200), np.float32)], 128)
+
+
+def test_reading_meets_five_shapes_and_batching_changes_nothing():
+    torch.manual_seed(0)
+    model = CRNN(CRNNConfig(n_classes=10, height=32, **SMALL))
+    rec = Recognizer(model, Alphabet(list("abcdefghi")))
+    shapes = set()
+    model.register_forward_pre_hook(lambda _, args: shapes.add(tuple(args[0].shape)))
+    rng = np.random.default_rng(0)
+    images = [rng.integers(0, 256, (40, w), dtype=np.uint8) for w in (30, 300, 90, 600, 45, 1000, 160)]
+    together = dict(rec.logprobs(images, batch_size=4))
+    assert shapes <= {(4, 1, 32, c) for c in crnn.width_classes(32)} and sorted(together) == list(range(7))
+    alone = dict(rec.logprobs(images, batch_size=1))       # every image read by itself, with no blanks
+    for i in range(7):
+        assert together[i].shape == alone[i].shape and np.allclose(together[i], alone[i], atol=1e-4)
 
 
 def test_checkpoint_round_trip(tmp_path):
