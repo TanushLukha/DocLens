@@ -13,7 +13,7 @@ import json
 import random
 import re
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 from .text import normalize, script_of
 
@@ -30,7 +30,8 @@ def sentences(text: str) -> Iterator[str]:
 
 def to_lines(sentence: str, rng: random.Random, min_len: int = 25, max_len: int = 70) -> Iterator[str]:
     """Pack words greedily into lines whose target length is drawn between min_len and max_len."""
-    words, cur, target = sentence.split(), [], rng.randint(min_len, max_len)
+    words, target = sentence.split(), rng.randint(min_len, max_len)
+    cur: list[str] = []
     for w in words:
         if cur and len(" ".join(cur + [w])) > target:
             yield " ".join(cur)

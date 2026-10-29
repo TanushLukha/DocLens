@@ -8,12 +8,13 @@ added because scans and phone pictures of documents fail in those ways too.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
+from typing import TypeAlias
 
 import cv2
 import numpy as np
 
-Image = np.ndarray
+Image: TypeAlias = np.ndarray
 
 
 def blur(img: Image, rng: np.random.Generator, sigma: tuple[float, float] = (1.0, 1.8)) -> Image:

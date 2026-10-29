@@ -27,7 +27,8 @@ for mod in ("numpy", "cv2", "PIL", "regex", "fontTools") + FOR_DOWNLOADS:
         m = importlib.import_module(mod)
         report(mod, True, getattr(m, "__version__", ""))
     except ImportError:
-        report(mod, mod in FOR_DOWNLOADS, "missing" + (" (needed by get_data.py: pip install -e \".[data]\")" if mod in FOR_DOWNLOADS else ""))
+        hint = " (needed by get_data.py: pip install -e \".[data]\")" if mod in FOR_DOWNLOADS else ""
+        report(mod, mod in FOR_DOWNLOADS, "missing" + hint)
 
 from PIL import features  # noqa: E402
 

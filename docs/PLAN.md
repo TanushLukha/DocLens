@@ -41,9 +41,11 @@ licence, and where does each one fail?
 
 | Set | What | Size | Licence | Used in |
 |---|---|---|---|---|
-| Mozhi Hindi | printed Hindi words cropped from 1,000 book pages scanned at 600 DPI, transcribed by hand | 79,762 train, 10,114 val, 10,173 test | CC BY 4.0 | M1 test; M2 train |
-| CORD v2 | photographed Indonesian receipts (Latin script) with the box and text of every word and the field each line belongs to | 800 train, 100 validation, 100 test | CC BY 4.0 | M1 test; M4 |
+| Mozhi Hindi | printed Hindi words cropped from 1,000 book pages scanned at 600 DPI, transcribed by hand | 79,762 train, 10,114 val, 10,173 test | CC BY 4.0 | M1 test; M2 train and validation |
+| CORD v2 | photographed Indonesian receipts (Latin script) with the box and text of every word and the field each line belongs to | 800 train, 100 validation, 100 test | CC BY 4.0 | M1 test; M2 train and validation; M4 |
 | Synthetic lines | held out sentences from TinyGPT (Hindi, Hinglish) and English sentences, drawn with known fonts and damaged in known ways | up to 750 lines, each under 8 conditions, with seen and unseen fonts | ours | M1, M2 test |
+| Synthetic validation lines | held out sentences not in the test sets, training fonts, one random condition each | 901 lines | ours | M2 validation |
+| Training text | lines from TinyGPT's training documents and English training sentences | 486,962 lines | as their sources | M2 train |
 | Tesseract models | fast and best LSTM models for Hindi, English, script detection | 6 files | Apache 2.0 | M1, M5 |
 
 ## How results are scored
@@ -198,6 +200,114 @@ The full tables are in `docs/results/m1_tesseract.md`, the headline numbers in t
   Mac (5.5.3) and 11% in a Linux container (5.3.4). Every comparison runs on the M2 MacBook, and
   each results file names the versions it used.
 
+## Decisions in M2
+
+**15. A CRNN trained with CTC, one model for both scripts.**
+What: seven convolutions with batch normalisation turn every 4 pixel wide slice of a line into a
+feature vector; two bidirectional LSTM layers (256 units each way) read the slices in both
+directions; a linear layer scores 258 classes per slice. About 4 million parameters. CTC loss.
+Why: the standard recognizer for printed lines, small enough to train on a laptop GPU, and CTC
+needs no character positions, only the text of each line. One alphabet holds Devanagari and
+Latin, so the model is never told the language (M1: telling Tesseract both costs accuracy).
+Why not an attention or transformer decoder (TrOCR style): it needs far more data and compute,
+and on long lines it can skip or repeat words; CTC's left to right alignment fits printed text.
+Why not fine tune a pretrained model: M2's question is what a model built from scratch reaches;
+pretrained readers come in M5.
+
+**16. Code points as output units.**
+What: each class is one Unicode code point after NFC (257 characters plus the blank); a conjunct
+such as क्ष is read as क, virama, ष.
+Why: the scorer counts code points, any conjunct can be written, and the output layer stays
+small. Why not aksharas (written syllables): thousands of classes, most of them rare, and a
+conjunct missing from training could never be read.
+
+**17. Training text and alphabet from training data only.**
+What: lines from TinyGPT's training documents and English training sentences (300,000 Hindi,
+150,000 Latin, all 36,962 mixed lines), Mozhi's training words and CORD's training receipts. The
+alphabet is every character of the real data plus the synthetic characters seen 50 times or more
+that a training font can draw.
+Why: nothing from a validation or test set shapes the model; a test character outside the
+alphabet stays an error, and the results report how often that happens.
+
+**18. Three sources: synthetic lines 50%, Mozhi words 30%, CORD crops 20%.**
+What: every training sample comes from one of the three by these shares; CORD's 800 training
+receipts give its training word and line crops.
+Why: synthetic lines bring unlimited Hindi, English and mixed text with exact labels and named
+damage; Mozhi brings real Hindi print; CORD brings real receipts (thermal print, folds, phone
+photos), a look no font of ours has. Why not synthetic only: a second run (`--synthetic-only`)
+measures exactly what the real data adds. Why use CORD's training split in M2 and not only in M4:
+M4 extracts fields from OCR text, so it needs a recognizer that reads receipts.
+
+**19. Damage drawn at random at every step.**
+What: 30% of synthetic lines stay clean; the rest get one of M1's seven damage conditions, and 20%
+of those a second one; real crops are damaged 30% of the time. Sizes 20 to 44 pixels, ink and
+paper colours and margins vary; a third of the lines are cut to one to four words, some Latin
+lines are capitalised, 5% are prices and quantities in receipt styles.
+Why: M1 found that no fixed cleaning helps on average; a model that has seen the damage learns
+to read through it. Why not a fixed, pre rendered training set: every pass would repeat the same
+pixels; drawing fresh costs CPU time, which the data workers spend while the GPU trains.
+
+**20. Images 48 pixels high, aspect kept, contrast stretched.**
+What: each crop is scaled to 48 pixels high (lines up to 32 times as wide), then its 2nd
+percentile (ink) maps to minus 1 and its 98th (paper) to plus 1.
+Why: Devanagari puts marks above and below the headline; Mozhi's crops are 48 pixels high, so they
+keep their resolution. The stretch puts faded thermal print and dark shadowed scans on one scale.
+Why not a fixed width: it would squash long lines and stretch short words. Why not binarise
+first: M1 showed global thresholding hurting under shadow. The benchmark (decision 24) times
+heights 32 and 48 before the long run.
+
+**21. Batches of similar width, and a packed LSTM.**
+What: each data worker draws 8 batches' worth of samples, sorts them by width and cuts them into
+batches; the LSTM runs packed, stopping at each image's own end.
+Why: a batch costs as much as its widest image, so mixing words with long lines would waste most
+of the compute on padding; packing keeps that padding out of the right to left pass (a test
+measures what is left: a hair, from the convolutions' borders).
+
+**22. Optimisation.**
+What: AdamW at a learning rate of 0.001 with weight decay 0.0001, 1,000 warm up steps, cosine decay to 0.00001, gradients
+clipped at 5, batches of 64, CTC computed on the CPU. Length and precision are set from the
+benchmark's numbers. A checkpoint every 1,000 steps; `--resume` continues from the last one.
+Why: the usual recipe for CRNNs; clipping guards the LSTM against rare large gradients. CTC on the
+CPU because its kernel exists on every PyTorch build, and it is a small part of a step (the
+benchmark checks the Apple GPU kernel and times both).
+
+**23. Model selection on validation data only.**
+What: every 1,000 steps the model reads 2,000 Mozhi validation words, 901 synthetic validation
+lines and CORD's validation words and lines; the checkpoint with the lowest mean CER over these
+sets is kept. The synthetic validation lines are held out text that is not in the test sets,
+drawn with training fonts only (the held out fonts are never used to choose anything).
+Why: test sets are read once, at the end. Only 124 held out lines mix both scripts and the test
+sets took 117 of them, so mixed lines are measured on the test sets only.
+
+**24. A benchmark before the long run.**
+What: `scripts/bench_m2.py` checks that every piece of a step runs on the GPU and times training
+at heights 32 and 48, with and without mixed precision, plus the data workers' speed.
+Why: the run takes hours on a laptop; ten minutes of measurement choose its settings.
+
+**25. Decoding: greedy, beam search, then TinyGPT.**
+What: greedy decoding; prefix beam search with 10 candidates; the candidates rescored by
+log P_ctc + lam log P_TinyGPT + beta length, with lam and beta chosen on the validation sets,
+once for lines holding Devanagari and once for the rest.
+Why: rescoring lets a language model fix what the pixels leave open (a vowel sign, a look alike
+consonant) without being built into the search; TinyGPT reads BPE tokens while the beam grows
+characters, so scoring finished candidates is the clean way to join them. Its weight is tuned
+because it read Hindi and Hinglish, not receipts. Why not an n gram model: TinyGPT beat them in
+its own M2 and M3.
+
+**26. Intervals and paired tests.**
+What: every CER comes with a bootstrap 95% interval (2,000 resamples of images); the CRNN and
+Tesseract are compared on the same images with a paired bootstrap and a p value.
+Why: a test set is a sample; an interval says how far the number could move on another sample,
+and pairing removes the part of that spread that comes from which images are hard.
+
+**27. Every push checked, every run recorded.**
+What: GitHub Actions runs ruff, mypy and all tests on Linux with the CPU build of PyTorch; tests
+that need downloaded data skip there. Training runs go to MLflow (SQLite in `runs/mlflow.db`) as
+well as to `metrics.jsonl`.
+Why: a change that breaks a test is caught before it reaches a long run. MLflow's own
+documentation names SQLite its default store and its old file store "to be deprecated soon".
+Why not Weights and Biases: an account and a network service for what fits in one local file.
+
 ## Decisions ahead
 
 Recorded here when each milestone is built. Already known:
@@ -210,5 +320,6 @@ Recorded here when each milestone is built. Already known:
 
 ## What runs where
 
-Everything runs on the M2 MacBook. M1 needs only the CPU (Tesseract uses every core); M2 trains on
-the Apple GPU through PyTorch's MPS backend.
+Everything that produces a number runs on the M2 MacBook. M1 needs only the CPU (Tesseract uses
+every core); M2 trains on the Apple GPU through PyTorch's MPS backend, with data workers on the
+CPU cores. GitHub Actions runs the tests on Linux after every push.

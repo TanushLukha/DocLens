@@ -14,7 +14,10 @@ dependencies = ["numpy>=1.24", "opencv-python>=4.8", "pillow>=10.1", "regex>=202
 
 [project.optional-dependencies]
 data = ["huggingface_hub>=0.24", "pyarrow>=14", "datasets>=2.16"]
-dev = ["pytest>=7", "rapidfuzz>=3.0"]
+train = ["torch>=2.6"]
+track = ["mlflow>=3.17"]
+lm = ["safetensors>=0.4"]
+dev = ["pytest>=7", "rapidfuzz>=3.0", "ruff>=0.15", "mypy>=1.11"]
 plot = ["matplotlib>=3.7"]
 
 [tool.setuptools.packages.find]
@@ -22,3 +25,16 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+# E741: l is a fine name in a table; E731: short lambdas in tables; B905, B023: deliberate in M1's code
+ignore = ["E741", "E731", "B905", "B023"]
+
+[tool.mypy]
+ignore_missing_imports = true
+files = ["src/doclens"]

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 import cv2
 import numpy as np
@@ -37,7 +37,7 @@ class Item:
         else:
             img = cv2.imread(str(self.path), cv2.IMREAD_GRAYSCALE)
             if img is None:
-                raise IOError(f"cannot read {self.path}")
+                raise OSError(f"cannot read {self.path}")
         return add_margin(img, self.margin) if self.margin else img
 
 
@@ -104,16 +104,14 @@ def _cord_rows(split: str, root: Path) -> Iterator[dict]:
     if not files:
         raise FileNotFoundError(f"no {split} parquet files under {root}")
     for f in files:
-        table = pq.read_table(f)
-        for row in table.to_pylist():
-            yield row
+        yield from pq.read_table(f).to_pylist()
 
 
 def _decode(image_field) -> np.ndarray:
     data = image_field["bytes"] if isinstance(image_field, dict) else image_field
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
     if img is None:
-        raise IOError("cannot decode a CORD image")
+        raise OSError("cannot decode a CORD image")
     return img
 
 
@@ -212,3 +210,29 @@ def synth(name: str, root: Path | None = None) -> list[Item]:
 
 def write_synth(folder: Path, rows: list[dict]) -> None:
     write_tsv(folder / "labels.tsv", FIELDS, [[r[k] for k in FIELDS] for r in rows])
+
+
+# crops saved as files (CORD training crops for M2)
+CROP_FIELDS = ["file", "text", "id", "script", "level"]
+
+
+def write_crops(folder: Path, items: list[Item]) -> None:
+    """Save crops as PNG files plus labels.tsv, so training workers read one small file per sample
+    instead of decoding whole receipts again."""
+    (folder / "images").mkdir(parents=True, exist_ok=True)
+    rows = []
+    for i, it in enumerate(items):
+        file = f"images/{i:06d}.png"
+        cv2.imwrite(str(folder / file), it.image())
+        rows.append([file, it.text, it.meta.get("id", ""), it.meta.get("script", ""), it.meta.get("level", "")])
+    write_tsv(folder / "labels.tsv", CROP_FIELDS, rows)
+
+
+def crops(folder: Path, level: str | None = None) -> list[Item]:
+    """Crops written by `write_crops`, optionally only words or only lines."""
+    items = []
+    for r in read_tsv(folder / "labels.tsv"):
+        if level is None or r["level"] == level:
+            items.append(Item(r["text"], {"set": folder.name, "id": r["id"], "script": r["script"], "level": r["level"]},
+                              folder / r["file"]))
+    return items

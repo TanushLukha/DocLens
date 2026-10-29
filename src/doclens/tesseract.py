@@ -97,7 +97,7 @@ def recognize(images: list[np.ndarray], cfg: TessConfig, workers: int | None = N
         for i, img in enumerate(images):
             p = tmp / f"{i:07d}.png"
             if not cv2.imwrite(str(p), img):
-                raise IOError(f"could not write {p}")
+                raise OSError(f"could not write {p}")
             paths.append(str(p))
         chunks = [paths[i:i + chunk] for i in range(0, len(paths), chunk)]
         with ThreadPoolExecutor(max_workers=workers) as ex:

@@ -15,7 +15,7 @@ consonant, so a word cannot be cut into separate characters the way an English w
 | Status | Milestone | What gets built |
 |---|---|---|
 | ✅ done | **M1 Baseline** | test sets (real Hindi words, real receipt words and lines, synthetic lines under eight kinds of damage); CER and WER; Tesseract measured three ways; OpenCV image cleaning compared |
-| next | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw |
+| in progress | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words and receipts; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw, with intervals and paired tests against Tesseract |
 | planned | **M3 Pages** | finding lines and blocks (classical against learned), reading order, whole page accuracy |
 | planned | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
 | planned | **M5 Comparison** | DocLens against PaddleOCR, Surya, EasyOCR and a small vision language model: accuracy, speed, memory, licence |
@@ -48,7 +48,7 @@ The study:
 
 ```bash
 python scripts/get_data.py                 # Mozhi test and val, CORD test, Tesseract models, English text
-pytest -q                                  # 27 tests
+pytest -q                                  # every test
 python scripts/make_synth.py               # the synthetic test sets, from TinyGPT's held out text
 python scripts/eval_tesseract.py --quick   # 200 images per set: checks the whole pipeline
 python scripts/eval_tesseract.py           # the full study; interrupted runs continue where they stopped
@@ -73,6 +73,26 @@ below comes from `python scripts/plot_m1.py` (after `pip install -e ".[plot]"`).
   set, counting outputs in the wrong script; eight OpenCV cleaning pipelines on every set; the
   characters Tesseract confuses most in Hindi. Each set is read in its own language: Hindi for
   Mozhi, English for CORD, both for the synthetic lines.
+
+## Run M2 on a Mac
+
+TinyGPT lives next to DocLens (`~/"Tanush's Code"/TinyGPT`): its training text feeds the synthetic
+lines and its language model rescores the output.
+
+```bash
+pip install -e ".[train,track,dev]"                   # PyTorch, MLflow, test and lint tools
+pip install -e ../TinyGPT safetensors                 # TinyGPT's language model, for rescoring
+python scripts/get_data.py --only mozhi_train cord_train
+python scripts/prepare_m2.py                          # training text, validation lines, CORD crops, alphabet
+pytest -q
+python scripts/bench_m2.py                            # what a training step costs on this Mac
+caffeinate -i python scripts/train_crnn.py --run main # the long run; add --resume to continue one
+python scripts/eval_crnn.py --run main                # the test sets, against Tesseract
+```
+
+Or all of it in one go: `bash scripts/run_m2.sh`. Training runs can be compared in MLflow:
+`mlflow ui --backend-store-uri sqlite:///runs/mlflow.db`. Every push is checked by GitHub Actions
+(lint, types, tests): `.github/workflows/ci.yml`.
 
 ## Results (M1, the Tesseract baseline)
 
@@ -135,9 +155,18 @@ src/doclens/
   preprocess.py   grey, scaling, denoising, CLAHE, Otsu, Sauvola, deskewing
   tesseract.py    batched, parallel Tesseract
   datasets.py     Mozhi, CORD and the synthetic sets, read into one shape
-  corpus.py       held out text lines from TinyGPT's corpus
-scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh
+  corpus.py       text lines from TinyGPT's corpus and English sentences
+  alphabet.py     the characters the recognizer writes, and their class numbers
+  crnn.py         the CRNN, its input preparation, CTC loss, checkpoints
+  traindata.py    training batches drawn fresh: synthetic lines, Mozhi words, CORD crops
+  ctc.py          greedy decoding, prefix beam search, exact CTC probability
+  recognize.py    reading crops with a trained model, in batches of similar width
+  lm.py           TinyGPT rescoring, and choosing its weights on validation data
+  stats.py        bootstrap intervals and paired comparisons
+scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh,
+                  prepare_m2, bench_m2, train_crnn, eval_crnn, run_m2.sh
 tests/            unit tests for all of the above
+.github/          CI: lint, type checks and tests on every push
 fonts/            35 font files with their licences (fonts/README.md)
 docs/             PLAN.md and results/
 data/, runs/      downloads and outputs, never committed

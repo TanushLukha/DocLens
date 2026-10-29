@@ -26,7 +26,7 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -141,7 +141,8 @@ def markdown(res: dict) -> str:
         L.append("")
 
     L.append("## Fast against best models (each set's own language, raw images)\n")
-    L.append("| Set | Language | Models | Images | CER | WER | Median CER | Catastrophic | Exact | Wrong script | Images per second |")
+    L.append("| Set | Language | Models | Images | CER | WER | Median CER | Catastrophic | Exact | Wrong script |"
+             " Images per second |")
     L.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for set_name in SETS:
         for cfg in ("fast", "best"):
@@ -197,7 +198,8 @@ def markdown(res: dict) -> str:
             L.append(f"| {set_name} | {k.replace('condition=', '')} | " + " | ".join(cells) + " |")
 
     if res.get("confusions"):
-        L.append("\n## What Tesseract gets wrong in Hindi (best models, -l hin: Mozhi; hin+eng: clean synthetic Devanagari lines)\n")
+        L.append("\n## What Tesseract gets wrong in Hindi"
+                 " (best models, -l hin: Mozhi; hin+eng: clean synthetic Devanagari lines)\n")
         c = res["confusions"]
         L.append("| Substituted (true > read) | Times | Dropped | Times | Invented | Times |")
         L.append("|---|---:|---|---:|---|---:|")

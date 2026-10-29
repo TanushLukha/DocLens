@@ -7,14 +7,15 @@ library, because they are the two steps whose behaviour is worth understanding.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
+from typing import TypeAlias
 
 import cv2
 import numpy as np
 
 from .degrade import rotate
 
-Image = np.ndarray
+Image: TypeAlias = np.ndarray
 
 
 def gray(img: Image) -> Image:
