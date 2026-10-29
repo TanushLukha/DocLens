@@ -152,6 +152,8 @@ it again (decision 13). Mozhi crops end at the ink. Page modes 8 and 13 react to
 ways: too little and too much both hurt (they seem to treat the whole image as the text, so a wide
 border shrinks it). Page mode 7 finds the text inside the crop and stays flat once there is
 enough background.
+On 2,000 validation words: no border 21.6%, a quarter of the height 6.2% (page mode 7), and page
+mode 8 is best at a tenth (5.8%) but reaches 60.2% at a full height.
 Why not page mode 8, the mode Tesseract names for single words: it is right only for one border
 size. Why not a border on every set: CORD crops already keep real background, and in a check on
 the CORD test words a white frame around the grey receipt raised the CER from 15% to 70%.
@@ -173,6 +175,28 @@ Why: Pillow's wheels include libraqm but load FriBiDi when Python starts, by nam
 Apple silicon keeps it in `/opt/homebrew/lib`, which macOS searches only when this variable says so.
 Why not build Pillow from source: it works too, but needs a compiler and Homebrew's image
 libraries, and the next `pip install --upgrade` silently brings back the wheel.
+
+## What M1 found, and what it means for M2
+
+The full tables are in `docs/results/m1_tesseract.md`, the headline numbers in the README.
+
+* **The yardstick.** Tesseract's best models, each set in its own language: Mozhi 6.5% CER,
+  synthetic lines 4.2% (seen fonts) and 3.2% (unseen fonts), CORD words 19.9%, CORD lines 42.8%.
+  M2 is scored on the same images with the same code.
+* **One model for both scripts.** Tesseract must be told the language, and telling it both costs
+  accuracy on single script text: 3.2 points of CER on Mozhi, 9.9 on CORD words. M2 learns one alphabet holding both scripts and is
+  never told which one a line uses.
+* **Train with damage instead of cleaning.** No fixed pipeline helps on average, and each filter
+  helps only its own damage. M2 draws its training lines through the eight damage conditions at
+  random, so robustness is learned rather than bolted on.
+* **Crops need background, in training as in testing.** Training crops get the same margin as test
+  crops (a quarter of the height for Mozhi, padding for synthetic lines), so the model never meets
+  ink touching the edge only at test time.
+* **Punctuation counts.** A lone danda is most of Tesseract's outright failures on Mozhi, so M2's
+  alphabet keeps । and ॥ as characters of their own, and the scorer keeps counting them.
+* **Results depend on the machine.** The same Tesseract models left 29% of CORD lines empty on the
+  Mac (5.5.3) and 11% in a Linux container (5.3.4). Every comparison runs on the M2 MacBook, and
+  each results file names the versions it used.
 
 ## Decisions ahead
 
