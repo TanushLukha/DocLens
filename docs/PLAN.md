@@ -235,7 +235,8 @@ receipts give its training word and line crops.
 Why: synthetic lines bring unlimited Hindi, English and mixed text with exact labels and named
 damage; Mozhi brings real Hindi print; CORD brings real receipts (thermal print, folds, phone
 photos), a look no font of ours has. Why not synthetic only: a second run (`--synthetic-only`)
-measures exactly what the real data adds. Why use CORD's training split in M2 and not only in M4:
+measures exactly what the real data adds; its checkpoint is chosen on the same validation sets as
+the main run's, so the two differ in training data only. Why use CORD's training split in M2 and not only in M4:
 M4 extracts fields from OCR text, so it needs a recognizer that reads receipts.
 
 **19. Damage drawn at random at every step.**
@@ -275,8 +276,10 @@ it stopped with "MPS backend out of memory": 2.45 GiB in PyTorch's tensors, 17.5
 allocations. Five classes leave ten shapes in all, five for training and five for reading, and the
 budget still gives every training step about the same memory and time. Padding barely changes:
 28.0% of the pixel columns, against 26.5% for batches cut from sorted pools (the same simulation,
-8,192 samples). `scripts/bench_m2.py` follows GPU memory over 100 steps on the five shapes and
-over 16 steps on new ones.
+8,192 samples). On the Mac, `scripts/bench_m2.py` measured both: 100 steps on the five shapes
+held GPU memory at 5.3 GB (reading one batch of each width, as validation does, took it to 6.9
+GB), and 16 more steps on new shapes took it to 9.8 GB. The full run then stayed between 5.3 and
+5.6 GB for all 20,000 steps, at a median 216 samples per second against 58 to 73 before.
 Why not more classes: each adds two shapes to build and keep. Why not fewer: they pad more; with
 one width of 1,152 pixels, nine tenths of a batch of words would be padding. Why not a fixed
 number of images at any width: the run before, with batches of 64, crawled at 18 to 30 samples per

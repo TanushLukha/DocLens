@@ -2,6 +2,7 @@
 
     python scripts/eval_crnn.py --run main            everything; results to docs/results/m2_crnn.*
     python scripts/eval_crnn.py --run main --quick    200 images per set, to check the pipeline
+    python scripts/eval_crnn.py --run synthetic       another run; results to docs/results/m2_crnn_synthetic.*
 
 1. Reads every M1 test set three ways: greedy decoding, beam search (10 candidates), and beam
    search with the candidates rescored by TinyGPT. TinyGPT's two weights are chosen on the
@@ -351,7 +352,7 @@ def main():
 
     out = run_dir if args.quick else OUT
     out.mkdir(parents=True, exist_ok=True)
-    stem = "m2_crnn_quick" if args.quick else "m2_crnn"
+    stem = "m2_crnn" + ("" if args.run == "main" else f"_{args.run}") + ("_quick" if args.quick else "")
     (out / f"{stem}.json").write_text(json.dumps(res, indent=1, ensure_ascii=False))
     (out / f"{stem}.md").write_text(markdown(res), encoding="utf8")
     print(f"wrote {out / stem}.json and .md")
