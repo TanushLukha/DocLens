@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+import regex
 
 from . import degrade
 from .fonts import Font
@@ -54,7 +55,9 @@ def draw_style(rng: np.random.Generator, columns: int) -> Style:
 
 
 def wrap(words: list[str], width: float, measure: Callable[[str], float], indent: float = 0.0) -> list[str]:
-    """Greedy word wrap by drawn width; a word wider than a whole line gets a line of its own."""
+    """Greedy word wrap by drawn width. A word wider than a whole line (a web address, say) is
+    broken between characters, without a hyphen, the way web addresses are broken in print; drawn
+    whole it would run into the next column."""
     lines: list[str] = []
     cur: list[str] = []
     for w in words:
@@ -62,10 +65,28 @@ def wrap(words: list[str], width: float, measure: Callable[[str], float], indent
         if cur and measure(" ".join(cur + [w])) > room:
             lines.append(" ".join(cur))
             cur = []
+            room = width
+        if not cur and measure(w) > room:
+            parts = _break(w, room, width, measure)
+            lines.extend(parts[:-1])
+            w = parts[-1]
         cur.append(w)
     if cur:
         lines.append(" ".join(cur))
     return lines
+
+
+def _break(word: str, first: float, width: float, measure: Callable[[str], float]) -> list[str]:
+    """Pieces of a word, cut between grapheme clusters (so a Devanagari letter keeps its vowel
+    signs), the first at most `first` wide and the rest at most `width`."""
+    parts: list[str] = []
+    cur, room = "", first
+    for g in regex.findall(r"\X", word):
+        if cur and measure(cur + g) > room:
+            parts.append(cur)
+            cur, room = "", width
+        cur += g
+    return parts + [cur]
 
 
 class Canvas:

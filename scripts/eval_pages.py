@@ -12,9 +12,13 @@ Readers, each on every page:
     doctr rows+crnn    the same lines in docTR's default order (top to bottom, left to right)
     true+crnn          the true lines, read by the CRNN: what reading costs without any finding
 
-For each: page CER with a bootstrap 95% interval and a paired comparison with Tesseract; line
+For each: page CER with a bootstrap 95% interval and a paired comparison with Tesseract, both over
+page designs (a design's five damaged pages share text and layout, so they are drawn together;
+every receipt is its own design); line
 precision, recall and F1 at an IoU of 0.5, splits and merges; Kendall's tau of the reading order;
-seconds per page. Line finding and reading are cached in runs/m3/ (reading per CRNN checkpoint).
+seconds per page. Line finding and reading are cached in runs/m3/ (reading per CRNN checkpoint);
+a cached result is used only for the same page image and the same finder code, and a reading only
+for the same lines, so redrawn pages or a changed finder are always run again.
 """
 import argparse
 import hashlib
@@ -23,6 +27,7 @@ import platform
 import sys
 import time
 from collections import defaultdict
+from importlib import metadata
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +35,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from doclens import DATA, REPO, stats, tesseract  # noqa: E402
+from doclens import DATA, REPO, doctr_lines, layout, preprocess, stats, tesseract  # noqa: E402
 from doclens.crnn import pick_device  # noqa: E402
 from doclens.layout import LineFinder  # noqa: E402
 from doclens.pagereader import read_page  # noqa: E402
@@ -65,8 +70,27 @@ def sha256(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
+def page_key(p: Page) -> str:
+    """A fingerprint of a page's pixels."""
+    data = p.path.read_bytes() if p.array is None and p.path is not None else p.image().tobytes()
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def code_key(*modules) -> str:
+    """A fingerprint of the code of the modules a finder runs."""
+    h = hashlib.sha256()
+    for m in modules:
+        h.update(Path(m.__file__).read_bytes())
+    return h.hexdigest()[:16]
+
+
+def lines_key(quads: list) -> str:
+    return hashlib.sha256(json.dumps(quads).encode("utf8")).hexdigest()[:16]
+
+
 class Store:
-    """One JSON file per set and finder (or reading), keyed by page id."""
+    """One JSON file per set and finder (or reading), keyed by page id; every entry carries the key
+    of what it was computed from."""
 
     def __init__(self, folder: Path):
         self.folder = folder
@@ -81,69 +105,88 @@ class Store:
 
 
 def find_lines(set_name: str, pages: list[Page], store: Store, args) -> dict[str, dict]:
-    """Every finder's lines on every page: {finder: {page id: {"quads", "seconds"[, "texts"]}}}."""
+    """Every finder's lines on every page: {finder: {page id: {"key", "quads", "seconds"[, "texts"]}}}."""
     out = {}
+    pkey = {p.id: page_key(p) for p in pages}
+
+    def stale(cache: dict, code: str) -> list[Page]:
+        return [p for p in pages if cache.get(p.id, {}).get("key") != f"{pkey[p.id]} {code}"]
+
     tess = store.get("tesseract")
-    todo = [p for p in pages if p.id not in tess]
+    langs = "eng" if set_name == "cord" else "hin+eng"
+    cfg = tesseract.TessConfig(langs=langs, psm=3, tessdata=str(DATA / "tessdata_best"))
+    code = f"{tesseract.version()} {langs} psm 3 best {code_key(tesseract)}".replace(" ", "_")
+    todo = stale(tess, code)
     if todo:
-        langs = "eng" if set_name == "cord" else "hin+eng"
-        cfg = tesseract.TessConfig(langs=langs, psm=3, tessdata=str(DATA / "tessdata_best"))
         t = time.perf_counter()
         results = tesseract.read_pages([p.image() for p in todo], cfg, workers=args.workers)
         per = (time.perf_counter() - t) * args.workers / max(len(todo), 1)     # one core's time per page
         for p, r in zip(todo, results, strict=True):
-            tess[p.id] = {"quads": [q.tolist() for q in r.quads], "texts": r.texts, "seconds": per}
+            tess[p.id] = {"key": f"{pkey[p.id]} {code}", "quads": [q.tolist() for q in r.quads], "texts": r.texts,
+                          "seconds": per}
         store.put("tesseract", tess)
     out["tesseract"] = tess
 
     classical = store.get("classical")
+    code = code_key(layout, preprocess)
+    todo = stale(classical, code)
     finder = LineFinder()
-    for p in pages:
-        if p.id not in classical:
-            t = time.perf_counter()
-            quads = finder(p.image())
-            classical[p.id] = {"quads": [q.tolist() for q in quads], "seconds": time.perf_counter() - t}
-    store.put("classical", classical)
+    for p in todo:
+        t = time.perf_counter()
+        quads = finder(p.image())
+        classical[p.id] = {"key": f"{pkey[p.id]} {code}", "quads": [q.tolist() for q in quads],
+                           "seconds": time.perf_counter() - t}
+    if todo:
+        store.put("classical", classical)
     out["classical"] = classical
 
     order, rows = store.get("doctr"), store.get("doctr rows")
-    todo = [p for p in pages if p.id not in order]
-    if todo and not args.no_doctr:
-        from doclens.doctr_lines import DoctrLines
-        det = DoctrLines(device=str(pick_device(args.doctr_device)))
+    dcode: str | None
+    try:
+        dcode = f"doctr_{metadata.version('python-doctr')}_db_resnet50_{code_key(doctr_lines)}"
+    except metadata.PackageNotFoundError:
+        dcode = None
+    todo = stale(order, dcode) if dcode else pages
+    if todo and dcode and not args.no_doctr:
+        det = doctr_lines.DoctrLines(device=str(pick_device(args.doctr_device)))
         for p in todo:
             t = time.perf_counter()
             found = det(p.image())
             s = time.perf_counter() - t
-            order[p.id] = {"quads": [q.tolist() for q in found["order"]], "seconds": s}
-            rows[p.id] = {"quads": [q.tolist() for q in found["rows"]], "seconds": s}
+            key = f"{pkey[p.id]} {dcode}"
+            order[p.id] = {"key": key, "quads": [q.tolist() for q in found["order"]], "seconds": s}
+            rows[p.id] = {"key": key, "quads": [q.tolist() for q in found["rows"]], "seconds": s}
         store.put("doctr", order)
         store.put("doctr rows", rows)
-    if order:
+        todo = []
+    if not todo:
         out["doctr"], out["doctr rows"] = order, rows
+    else:
+        print(f"   docTR left out: {len(todo)} pages have no docTR lines for this image and code", flush=True)
     out["true"] = {p.id: {"quads": [line.quad.tolist() for line in p.lines], "seconds": 0.0} for p in pages}
     return out
 
 
 def read_lines(pages: list[Page], found: dict[str, dict], store: Store, rec: Recognizer, tag: str) -> dict[str, dict]:
-    """The CRNN's reading of every finder's lines: {finder: {page id: {"texts", "seconds"}}}. A line
-    another finder already gave on the same page (docTR's two orders hold the same lines) is not
-    read twice."""
+    """The CRNN's reading of every finder's lines: {finder: {page id: {"key", "texts", "seconds"}}}. A
+    line another finder already gave on the same page (docTR's two orders hold the same lines) is
+    not read twice."""
     out: dict[str, dict] = {}
     for finder, by_page in found.items():
         name = f"read {finder} {tag}"
         done = store.get(name)
-        todo = [p for p in pages if p.id not in done and p.id in by_page]
+        todo = [p for p in pages if p.id in by_page and done.get(p.id, {}).get("key") != lines_key(by_page[p.id]["quads"])]
         for p in todo:
             quads = by_page[p.id]["quads"]
             keys = [json.dumps(q) for q in quads]
             same = next((f for f in out if sorted(keys) == sorted(json.dumps(q) for q in found[f][p.id]["quads"])), None)
             if same is not None:          # the same lines in another order: the same reading, and its time
                 text = dict(zip((json.dumps(q) for q in found[same][p.id]["quads"]), out[same][p.id]["texts"], strict=True))
-                done[p.id] = {"texts": [text[k] for k in keys], "seconds": out[same][p.id]["seconds"]}
+                done[p.id] = {"key": lines_key(quads), "texts": [text[k] for k in keys],
+                              "seconds": out[same][p.id]["seconds"]}
                 continue
             t = time.perf_counter()
-            done[p.id] = {"texts": read_page(rec, p.image(), [np.float32(q) for q in quads]),
+            done[p.id] = {"key": lines_key(quads), "texts": read_page(rec, p.image(), [np.float32(q) for q in quads]),
                           "seconds": time.perf_counter() - t}
         if todo:
             store.put(name, done)
@@ -172,13 +215,22 @@ def score(pages: list[Page], found: dict, read: dict) -> dict[str, list[dict]]:
 
 
 def summarize(pages: list[Page], scores: dict[str, list[dict]]) -> dict:
-    res: dict = {"pages": len(pages), "readers": {}}
+    designs = [p.meta.get("base", p.id) for p in pages]           # a receipt is a design of its own
+    order = list(dict.fromkeys(designs))                           # in page order
+
+    def per_design(values: list[int]) -> list[int]:
+        total: defaultdict[str, int] = defaultdict(int)
+        for d, v in zip(designs, values, strict=True):
+            total[d] += v
+        return [total[d] for d in order]
+
+    res: dict = {"pages": len(pages), "designs": len(order), "readers": {}}
     tess = scores.get("tesseract")
     for reader, rows in scores.items():
         e = [r["edits"] for r in rows]
         c = [r["chars"] for r in rows]
         page_cer = [a / max(b, 1) for a, b in zip(e, c, strict=True)]
-        r = {"cer": stats.bootstrap_rate(e, c), "median_page_cer": float(np.median(page_cer)),
+        r = {"cer": stats.bootstrap_rate(per_design(e), per_design(c)), "median_page_cer": float(np.median(page_cer)),
              "seconds_find": float(np.mean([x["seconds_find"] for x in rows])),
              "seconds_read": float(np.mean([x["seconds_read"] for x in rows]))}
         if "found_lines" in rows[0]:
@@ -189,8 +241,8 @@ def summarize(pages: list[Page], scores: dict[str, list[dict]]) -> dict:
                      f1=2 * prec * rec / max(prec + rec, 1e-9), splits=sum(x["splits"] for x in rows),
                      merges=sum(x["merges"] for x in rows), tau=float(np.mean(taus)) if taus else None)
         if tess is not None and reader != "tesseract":
-            r["vs_tesseract"] = stats.paired(e, [x["edits"] for x in tess], c)
-        groups = defaultdict(lambda: [0, 0])
+            r["vs_tesseract"] = stats.paired(per_design(e), per_design([x["edits"] for x in tess]), per_design(c))
+        groups: defaultdict[str, list[int]] = defaultdict(lambda: [0, 0])
         for p, x in zip(pages, rows, strict=True):
             for key in ("condition", "script", "columns"):
                 if key in p.meta:
@@ -214,11 +266,13 @@ def fewer_more(x: float) -> str:
 
 def markdown(res: dict) -> str:
     L = ["# M3 results: whole pages\n",
-         f"{res['machine']}. Page CER in percent with a bootstrap 95% interval over pages; lines match at an IoU of"
+         f"{res['machine']}. Page CER in percent with a bootstrap 95% interval over page designs (a design's five"
+         " damaged pages drawn together; on CORD, receipts), and the comparison with Tesseract paired the same way;"
+         " lines match at an IoU of"
          " 0.5; tau is Kendall's tau of the reading order of matched lines (1: the true order). Seconds per page"
          " for finding lines and for reading them (Tesseract's time is its whole run, on one core).\n"]
     for set_name, s in res["sets"].items():
-        L.append(f"## {set_name} ({s['pages']} pages)\n")
+        L.append(f"## {set_name} ({s['pages']} pages, {s['designs']} designs)\n")
         L.append("| Reader | Page CER | Against Tesseract | p | Precision | Recall | F1 | Splits | Merges | Tau | Seconds |")
         L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for reader, r in s["readers"].items():

@@ -45,7 +45,7 @@ licence, and where does each one fail?
 | CORD v2 | photographed Indonesian receipts (Latin script) with the box and text of every word and the field each line belongs to | 800 train, 100 validation, 100 test | CC BY 4.0 | M1 test; M2 train and validation; M4 |
 | Synthetic lines | held out sentences from TinyGPT (Hindi, Hinglish) and English sentences, drawn with known fonts and damaged in known ways | up to 750 lines, each under 8 conditions, with seen and unseen fonts | ours | M1, M2 test |
 | Synthetic validation lines | held out sentences not in the test sets, training fonts, one random condition each | 901 lines | ours | M2 validation |
-| Synthetic pages | held out Hindi and English text set as A4 pages at 300 dpi, one and two columns, with every line's box, text and order | 300 test pages (150 per font set), 30 validation pages | ours | M3 |
+| Synthetic pages | held out Hindi and English text set as A4 pages at 300 dpi, one and two columns, with every line's box, text and order | 300 test pages (150 per font set), 150 validation pages | ours | M3 |
 | Training text | lines from TinyGPT's training documents and English training sentences | 486,962 lines | as their sources | M2 train |
 | Tesseract models | fast and best LSTM models for Hindi, English, script detection | 6 files | Apache 2.0 | M1, M5 |
 
@@ -483,13 +483,55 @@ k 0.1 and window of 3 text heights, a closing of 3 pixels) were chosen on the va
 CORD's validation receipts by the mean of their line F1, never on a test set: 0.999 on the pages and
 0.59 on the receipts.
 
+**36. Two faults found in the first run, fixed, and every page drawn again.**
+What: the first full run, on pages drawn with seed 0, found two faults. (1) The classical finder's
+rule for a title or a page number in the gap between columns could cut off a strip many lines tall
+as if it were a title (36 line pitches on one page), and the columns were then read in strips: the
+top of both, then the bottom of both. Now only a strip at most 4 line pitches tall can be cut off
+this way; two title lines at the largest title size are 3.4. (2) A word wider than its column, a
+web address on one page design, was drawn whole, across the column beside it. Now such a word is
+broken between letters, without a hyphen, as web addresses are broken in print. The validation
+pages grew from 6 page designs to 30, and every set was drawn again with seed 2 (the validation
+pages with seed 3): new layouts, new damage and a new choice of text and fonts for every page, from
+the same held out text and fonts. The first
+run's results are kept in `docs/results/m3_pages_first_run.md`. The evaluation now reuses a cached
+result only for the same page image and the same finder code, so redrawn pages are never scored
+with old lines.
+Why: fixing faults found on test pages and scoring those pages again would measure the fixes on
+the pages they were made for; fresh pages measure them fairly. The limit of 4 pitches comes from
+the page design (a title has at most two lines), not from the test pages, and was checked on the
+new validation pages and CORD's validation receipts before any test page was scored. On the 150
+validation pages the old rule read 3 two column pages in the wrong order and the new rule none; the
+lines changed on those 3 pages only, and page CER went from 1.09% to 0.74%. On the 100 validation
+receipts the lines changed on 1 receipt and page CER stayed at 33.3%.
+Why not keep the old pages and leave out the flawed design: words wider than a column can turn up
+on any page drawn from the same text, and the finder's rule was wrong on four other designs.
+
+**37. Intervals over page designs, not over pages.**
+What: on the synthetic sets, bootstrap intervals and paired comparisons resample page designs, each
+with its five damaged pages, instead of single pages; on CORD every receipt is a design of its own,
+so nothing changes there.
+Why: a design's five pages share their text, layout and fonts, and a finder that fails on a layout
+fails on most of its five pages (the first run's broken pages came in whole designs), so 150 pages
+are not 150 independent draws. Over single pages the intervals were too narrow: docTR, unchanged
+between the runs, read the first run's pages with seen fonts at 6.6% (4.3% to 9.3% over pages) and
+the new ones at 10.9%. Over designs its interval on the new pages is 5.1% to 17.4% (7.7% to 14.5%
+over pages), while Tesseract's barely moves (8.6% to 14.2%, against 8.6% to 14.1%): the intervals
+widen exactly where a finder depends on the layout. Why not over pages: that answers how a finder
+would do on these same 30 designs under new damage, not on new pages.
+
 ## What M3 found, and what it means for M4
 
-The full tables are in `docs/results/m3_pages.md`, the headline numbers and findings in the README.
+The full tables are in `docs/results/m3_pages.md` (the first run's in `m3_pages_first_run.md`),
+the headline numbers and findings in the README.
 
 * **The error left on a page is in finding its lines.** The CRNN reads the true lines at 0.1% and
-  0.5% CER on the synthetic pages and 1.9% on CORD's receipts; the best finder on each set leaves
-  4.8%, 5.9% and 5.6%. Whole pages now get better through better finding, not a better recognizer.
+  0.4% CER on the synthetic pages and 1.9% on CORD's receipts; the best finder on each set leaves
+  0.4%, 1.6% and 5.6%. Whole pages now get better through better finding, not a better recognizer.
+* **For printed pages the classical finder is the one to keep.** 0.4% and 1.6%, against
+  Tesseract's 11.4% and 9.7% and docTR's 10.9% and 12.0%, at 0.21 s a page on the CPU. In the
+  unseen fonts, over half of what is left is on photos of two column pages (8.2%, with merged
+  lines), the case to watch when M5 compares whole systems.
 * **M4 reads receipts with docTR's detector in its top to bottom order.** On CORD that gives 5.6%
   page CER, against 51.8% for Tesseract and 44.2% for the classical finder, whose rules were
   written for pages. M4 extracts fields from the true text and from this OCR text, so what
@@ -497,27 +539,29 @@ The full tables are in `docs/results/m3_pages.md`, the headline numbers and find
 * **Line F1 can mislead, so M4 is scored end to end.** docTR has the lowest line F1 on the
   receipts (13.8: it finds names, quantities and prices as separate pieces where CORD has one row)
   and the best page CER. M4 reports field F1 on OCR text, not detection scores.
-* **Reading order must fit the document.** docTR's reading order is needed for columns (6.6%
-  against 44.9% top to bottom) and wrong for receipts (47.1% against 5.6%), where it takes the
-  prices for a column. A service for both kinds of document must tell them apart or use an order
-  that handles both; decided when the service is built (M6).
-* **Two faults, to be fixed without touching the test pages.** The classical finder's rule for a
-  title or a page number in the gap between columns (decision 35) cut off strips many lines tall
-  on 13 and 15 two column test pages, and one test page design draws a web address across both
-  columns. The rule's fault showed once on the validation pages too (a photo whose reading order
-  came out at a tau of 0.81), but settings were chosen by line F1, which cannot see reading order;
-  from now on they are chosen by page CER, which can. Fixing either fault and scoring the same
-  test pages again would tune DocLens on its test set, so the fixes are checked on validation
-  pages and on new test pages drawn with a new seed.
-* **docTR's detector needs level pages.** On pages turned by 1 to 4 degrees it cuts 50% to 63% of
-  the lines into pieces, and on two columns its reading order then fails (34.2% and 35.6%).
-  Levelling each page with the skew estimate before docTR sees it is the fix to try, in M5.
+* **Reading order must fit the document.** docTR's reading order is needed for columns (10.9%
+  against 44.5% top to bottom) yet still breaks on 26 and 28 of the 75 two column pages, and it
+  is wrong for receipts (47.1% against 5.6%), where it takes the prices for a column. The
+  classical finder's order is right on both (tau 1.000 and 0.998 on the pages, 1.000 on the
+  receipts), but on receipts its lines are not. A service for both kinds of document must tell
+  them apart or use an order that handles both; decided when the service is built (M6).
+* **The fixes held on fresh pages (decision 36).** On these test pages the old title rule would
+  have read 12 and 15 of the 75 two column pages in the wrong order; the new rule reads 0 and 1.
+  Settings are now chosen by page CER, which sees reading order, not by line F1 alone, which
+  missed the fault on the first validation pages.
+* **docTR's detector needs level pages.** On pages turned by 1 to 4 degrees it cuts 49% to 63% of
+  the lines into pieces, and on turned two column pages its reading order then fails (38.8% and
+  47.4%). Levelling each page with the skew estimate before docTR sees it is the fix to try, in
+  M5.
 * **Level crops settled skew.** Cut along their quadrilaterals and turned level, the true lines
-  of turned pages read as well as those of clean pages (0.1% and 0.5%), so training on more skew,
+  of turned pages read as well as those of clean pages (0.1% and 0.4%), so training on more skew,
   planned after M2, was not run.
-* **Reading is the slow part.** Per page, finding takes 0.21 s (classical finder, CPU) or 0.32 s
-  (docTR, GPU) and reading 0.8 to 0.9 s on the GPU, against Tesseract's 12 s on one core. M6
-  measures reading on CPUs, and batching lines across pages.
+* **Which designs are drawn matters.** docTR, unchanged, read the first run's pages at 6.6% and
+  these at 10.9% (seen fonts). Intervals over designs (decision 37) show that spread; every later
+  synthetic set keeps a design's pages together in its intervals.
+* **Reading is the slow part.** Per page, finding takes 0.21 s (classical finder, CPU) or 0.33 to
+  0.34 s (docTR, GPU) and reading 0.8 to 1.1 s on the GPU, against Tesseract's 11 to 12 s on one
+  core. M6 measures reading on CPUs, and batching lines across pages.
 
 ## Decisions ahead
 

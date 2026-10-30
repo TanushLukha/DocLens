@@ -14,8 +14,8 @@
    title's gaps are between words), and only between sides of about the same width with a gap much
    narrower than they are: a receipt's prices belong to the item names beside them. When no cut down is
    possible, the region is cut across: below a title or above a page number that reaches into the
-   gap between columns, else preferably where the cut frees columns; without columns, top to bottom
-   is the reading order anyway.
+   gap between columns (a strip of at most a few lines), else preferably where the cut frees
+   columns; without columns, top to bottom is the reading order anyway.
 5. Lines. Each block is levelled again by its own angle (what is left of a page's turn there). The
    ink per row rises on every line and falls between lines; rows holding a good share of the ink of
    the strongest row nearby are the lines' cores, and every component joins the core it overlaps
@@ -51,6 +51,8 @@ class Params:
     balance: float = 0.75         # sides at least this share of each other's width,
     wide: float = 3.0             # and this many times as wide as the gap between them, are columns
     row_gap: float = 0.9          # an empty band across a region must be this many text heights tall to cut it
+    strip: float = 4.0            # a title or page number cut off above or below columns is at most this many
+                                  # line pitches tall: two title lines at the largest title size are 3.4
     local_angle: float = 4.0      # each block is levelled again, up to this many degrees
     core: float = 0.2             # rows with more ink than this share of the strongest row within half a pitch
                                   # are a line's core
@@ -155,19 +157,28 @@ class LineFinder:
         across = self._across_cuts(idx)
         if not across:
             return [idx]
-        # columns hidden by a title above them or a page number below: cut off the strip that blocks the gap
+        # columns hidden by a title above them or a page number below: cut off the strip that blocks the
+        # gap. Only a short strip can be one; taken for a title, the top half of two columns would be
+        # read before their bottom half.
         by_place = sorted(across, key=lambda tb: self.boxes[tb[0], 3].max())
-        (head, after_head), (before_foot, foot) = by_place[0], by_place[-1]
-        core = np.setdiff1d(idx, np.concatenate([head, foot]))
-        gap = self._down(core) if len(by_place) > 1 else None
-        if gap is not None:
-            if self._blocks(head, gap):
-                return self._xy_cut(head) + self._xy_cut(after_head)
-            if self._blocks(foot, gap):
-                return self._xy_cut(before_foot) + self._xy_cut(foot)
+        if len(by_place) > 1:
+            (head, after_head), (before_foot, foot) = by_place[0], by_place[-1]
+            head, foot = (s if self._short(s) else s[:0] for s in (head, foot))
+            if len(head) or len(foot):
+                gap = self._down(np.setdiff1d(idx, np.concatenate([head, foot])))
+                if gap is not None:
+                    if len(head) and self._blocks(head, gap):
+                        return self._xy_cut(head) + self._xy_cut(after_head)
+                    if len(foot) and self._blocks(foot, gap):
+                        return self._xy_cut(before_foot) + self._xy_cut(foot)
         top, bottom = next(((t, b) for t, b in across[:8] if self._down(t) is not None or self._down(b) is not None),
                            across[0])
         return self._xy_cut(top) + self._xy_cut(bottom)
+
+    def _short(self, idx: np.ndarray) -> bool:
+        """Whether these components fit in a strip short enough to be a title or a page number."""
+        b = self.boxes[idx]
+        return bool(b[:, 3].max() - b[:, 1].min() <= self.p.strip * self.pitch)
 
     def _across_cuts(self, idx: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
         """Every empty band across the region tall enough to cut at, widest first, as (top, bottom)."""

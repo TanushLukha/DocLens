@@ -4,10 +4,14 @@
 
 test_seen and test_unseen hold the same 30 pages of text (Hindi, English and mixed; one and two
 columns), set with the training fonts and with the six held out fonts, each page clean and under
-the four page damages: 150 pages per set. val holds 6 more pages of other text, training fonts,
-for tuning the classical line finder. Hindi text comes from Hindi Wikipedia documents in TinyGPT's
-validation split, English from the held out English sentences; validation and test pages never
-share a document or a sentence. Everything is seeded: the same command gives the same pixels.
+the four page damages: 150 pages per set. val holds 30 more pages of other text in the training
+fonts, also under every damage, for choosing the classical line finder's settings. Hindi text
+comes from Hindi Wikipedia documents in TinyGPT's validation split, English from the held out
+English sentences; validation and test pages never share a document or a sentence. Everything is
+seeded: the same command gives the same pixels. Seed 2 is the default because seed 0 drew the test
+pages of M3's first run, where two faults were found and fixed (decision 36 in docs/PLAN.md), and
+seed 1 its validation pages; seed 2 draws every page afresh: new layouts, damage and choice of
+text and fonts.
 """
 import argparse
 import hashlib
@@ -99,7 +103,8 @@ def main():
     ap.add_argument("--corpus", default="../TinyGPT/data/clean", help="TinyGPT's data/clean folder")
     ap.add_argument("--english", default=str(DATA / "text" / "english.txt"))
     ap.add_argument("--per-layout", type=int, default=5, help="test pages per script and column count")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--val-per-layout", type=int, default=5, help="validation pages per script and column count")
+    ap.add_argument("--seed", type=int, default=2, help="test pages; validation pages use the next seed")
     args = ap.parse_args()
     fonts.require_shaping()
     docs = hindi_docs(Path(args.corpus))
@@ -108,12 +113,13 @@ def main():
     print(f"text: Hindi documents {len(docs['val'])} val, {len(docs['test'])} test; English sentences"
           f" {len(english['val'])} val, {len(english['test'])} test")
     tests = [(s, c, k) for s in SCRIPTS for c in (1, 2) for k in range(args.per_layout)]
-    vals = [(s, c, 100) for s in SCRIPTS for c in (1, 2)]
+    vals = [(s, c, 100 + k) for s in SCRIPTS for c in (1, 2) for k in range(args.val_per_layout)]
     build("val", vals, "train", docs["val"], english["val"], args.seed + 1)
     build("test_seen", tests, "train", docs["test"], english["test"], args.seed)
     build("test_unseen", tests, "test", docs["test"], english["test"], args.seed)
     (PAGES / "README.json").write_text(json.dumps({"sets": ["val", "test_seen", "test_unseen"], "seed": args.seed,
-                                                   "per_layout": args.per_layout}), encoding="utf8")
+                                                   "per_layout": args.per_layout, "val_per_layout": args.val_per_layout}),
+                                       encoding="utf8")
 
 
 if __name__ == "__main__":
