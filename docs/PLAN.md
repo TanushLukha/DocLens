@@ -32,7 +32,7 @@ licence, and where does each one fail?
 |---|---|---|---|
 | M1 Baseline | How well does Tesseract read Hindi, English and mixed lines, and what does image cleaning buy? | test sets, metrics, batched Tesseract, eight cleaning pipelines | Mozhi test words, CORD test words and lines, synthetic lines |
 | M2 Recognizer | Can a small CRNN trained from scratch beat Tesseract, also on fonts it never saw? | synthetic training lines drawn on the fly, CRNN with CTC, greedy and beam decoding, TinyGPT rescoring | the M1 sets, same metrics |
-| M3 Pages | How well are lines and blocks found, and does reading order hold on whole pages? | classical line finding (projections, connected components) against a learned detector; reading order | page CER, detection precision and recall |
+| M3 Pages | How well are lines and blocks found, and does reading order hold on whole pages? | classical line finding (projections, connected components, XY cut) against docTR's pretrained detector and Tesseract's page analysis; reading order | synthetic pages and CORD receipts: page CER, line precision and recall, reading order |
 | M4 Fields | What does layout add to extracting fields? | LayoutLMv3 and LiLT against a text only model; true text against OCR text; explanations | CORD field F1 |
 | M5 Comparison | Where does DocLens stand against modern OCR? | one harness for PaddleOCR, Surya, EasyOCR, a small VLM and DocLens | the M1 sets: accuracy, images per second, memory, licence |
 | M6 Ship | Can someone use it? | FastAPI service, Docker image, ONNX export, browser demo | latency and throughput, an end to end test |
@@ -45,6 +45,7 @@ licence, and where does each one fail?
 | CORD v2 | photographed Indonesian receipts (Latin script) with the box and text of every word and the field each line belongs to | 800 train, 100 validation, 100 test | CC BY 4.0 | M1 test; M2 train and validation; M4 |
 | Synthetic lines | held out sentences from TinyGPT (Hindi, Hinglish) and English sentences, drawn with known fonts and damaged in known ways | up to 750 lines, each under 8 conditions, with seen and unseen fonts | ours | M1, M2 test |
 | Synthetic validation lines | held out sentences not in the test sets, training fonts, one random condition each | 901 lines | ours | M2 validation |
+| Synthetic pages | held out Hindi and English text set as A4 pages at 300 dpi, one and two columns, with every line's box, text and order | 300 test pages (150 per font set), 30 validation pages | ours | M3 |
 | Training text | lines from TinyGPT's training documents and English training sentences | 486,962 lines | as their sources | M2 train |
 | Tesseract models | fast and best LSTM models for Hindi, English, script detection | 6 files | Apache 2.0 | M1, M5 |
 
@@ -300,8 +301,10 @@ of 256 words. A checkpoint every 1,000 steps; `--resume` continues from the last
 Why: the usual recipe for CRNNs; clipping guards the LSTM against rare large gradients. Mixed
 precision bought nothing on the Mac's GPU (fp16 406 against 396 ms per step of lines, bf16 448), and
 CTC runs as fast on the CPU as on the GPU (396 against 393 ms), where its kernel exists on every
-PyTorch build. Four workers draw about 2,000 synthetic lines per second, far more than the GPU
-uses, and leave memory and cores to the training process.
+PyTorch build. Four workers draw over 1,400 synthetic lines per second (361 each in the last
+benchmark), several times what the GPU uses (about 215 samples per second in the main run, whose
+log shows the data wait at 0% after the first 100 steps), and leave memory and cores to the
+training process.
 
 **23. Model selection on validation data only.**
 What: every 1,000 steps the model reads 2,000 Mozhi validation words, 901 synthetic validation
@@ -335,8 +338,13 @@ its own M2 and M3.
 **26. Intervals and paired tests.**
 What: every CER comes with a bootstrap 95% interval (2,000 resamples of images); the CRNN and
 Tesseract are compared on the same images with a paired bootstrap and a p value.
+Two training runs are compared the same way (`scripts/compare_runs.py`), from each run's cached
+readings.
 Why: a test set is a sample; an interval says how far the number could move on another sample,
-and pairing removes the part of that spread that comes from which images are hard.
+and pairing removes the part of that spread that comes from which images are hard. Why not
+compare two intervals side by side: much of each one's width is which images happen to be hard,
+which pairing cancels. On the unseen fonts, the paired interval of the two runs' difference is
+0.08 points wide, narrower than either run's own interval (0.16 and 0.12).
 
 **27. Every push checked, every run recorded.**
 What: GitHub Actions runs ruff, mypy and all tests on Linux with the CPU build of PyTorch; tests
@@ -345,6 +353,135 @@ well as to `metrics.jsonl`.
 Why: a change that breaks a test is caught before it reaches a long run. MLflow's own
 documentation names SQLite its default store and its old file store "to be deprecated soon".
 Why not Weights and Biases: an account and a network service for what fits in one local file.
+
+## What M2 found, and what it means for M3
+
+The full tables are in `docs/results/m2_crnn.md`, `m2_crnn_synthetic.md` and
+`m2_main_vs_synthetic.md`, the headline numbers in the README.
+
+* **The recognizer is ready for pages.** One CRNN reads every M1 test set better than Tesseract
+  without being told the language: Mozhi 0.6% against 6.5%, synthetic lines 0.7% and 0.8% (seen
+  and unseen fonts) against 4.2% and 3.2%, CORD words 1.3% against 19.9%, CORD lines 2.7% against
+  42.8%, every difference with p < 0.001. Those crops were cut from true boxes; M3 feeds it lines
+  found on whole pages, so page CER adds finding errors to reading errors, and M3 reports both.
+* **Skew is the one damage left.** Lines turned by 2 to 5 degrees hold about half of the CRNN's
+  errors on the synthetic lines (2.7% and 3.0% CER, against at most 0.6% under any other damage).
+  A line finder knows each line's angle, so M3 straightens every line before reading it and
+  measures that against training with more skew. M1's other cleaning filters are not needed in
+  front of the CRNN.
+* **Real images of the target kind matter most.** Trained on synthetic lines only, the same model
+  still beats Tesseract on every set, but real Mozhi and CORD training images cut its error on
+  those sets by 84% to 92%, for 0.2 points more on synthetic lines. Synthetic lines alone leave
+  3.9% on Mozhi and 16.8% on CORD words, so for a new source of pages, real training crops from it
+  are the first thing to look for.
+* **Comparisons must say what each reader trained on.** The main model trained on Mozhi's and
+  CORD's training splits; Tesseract did not, and the M5 models may not have. The synthetic only run
+  and the unseen fonts are the fair out of the box comparisons, so M5 reports both runs.
+* **Keep TinyGPT rescoring, tuned per model.** It never made a set measurably worse, helped on
+  unseen fonts, and helped most where the model was unsure (the synthetic only run: Mozhi 4.6% to
+  3.9%, CORD words 19.0% to 16.8%). Its weights are chosen again for every model: the synthetic
+  only model wanted 0.6 where the main model wanted 0.3 to 0.4.
+* **Training crops must be cut like test crops.** A lone danda, Tesseract's commonest failure in
+  M1, is also what the synthetic only model never learned (all 576 misread): its training text
+  almost never shows one alone, while 5.5% of Mozhi's training words are one. M3 checks how its line finder
+  cuts lines against how the training crops were cut.
+* **CPU speed is the open cost.** On the GPU the CRNN outreads Tesseract on lines and words; on
+  the CPU alone it is slower on words and receipt lines (288 against 511 Mozhi words per second).
+  M6 serves on CPUs, so ONNX export and batching by page are measured there.
+* **On the Apple GPU, memory follows tensor shapes.** Five fixed batch shapes (decision 21) held
+  GPU memory at 5.3 to 5.6 GB through both 20,000 step runs. Later models trained on the Mac keep
+  their shapes fixed the same way.
+
+## Decisions in M3
+
+**28. Test pages: synthetic pages and CORD's receipts.**
+What: 300 synthetic pages (30 pages of text, Hindi, English and mixed, in one and two columns, each
+set once with the training fonts and once with the six held out fonts, clean and under four page
+damages) and CORD's 100 test receipts.
+Why: measuring line finding needs every line's position, text and order. No open set of printed
+Hindi pages marks its lines: Mozhi publishes word crops only, and IndicDLP marks layout blocks
+(paragraphs, tables, headers) without lines or text. Synthetic pages give exact lines and order and
+change one thing at a time (script, layout, fonts, damage); CORD gives real photographs.
+Why not real scanned Hindi books: Wikisource's proofread scans have text but no line boxes, so they
+could only give page CER, and they would need downloading on the Mac; left out to keep M3 short.
+Why not FUNSD or SROIE: English only, with licences that limit use.
+
+**29. CORD's receipts masked to their annotated part.**
+What: everything outside the hull of a receipt's annotated words (widened by a word height), and
+CORD's separator lines and do not care regions, is painted in the paper's colour before any reader
+sees the receipt. Its lines are CORD's rows, each the smallest rectangle around its words, top to
+bottom. Runs of three or more of one separator character (------, =====) are removed from both
+texts before scoring.
+Why: CORD annotates the item list but not the shop's details (blurred for privacy) nor every
+separator; unmasked, every reader would be charged for reading real text that has no truth. The
+mask is the same for every reader.
+
+**30. Pages drawn like M1's lines.**
+What: A4 at 300 dpi, a title, one or two columns of paragraphs on a baseline grid, a page number;
+every line drawn by render_line, its truth the tightest box around its ink, carried through the
+damage as a quadrilateral. Damage: clean, scanner noise, a shadow, the page turned by 1 to 4
+degrees, a phone photo (perspective, uneven light, soft focus, JPEG). Text: Hindi Wikipedia
+documents of TinyGPT's validation split and held out English sentences; validation pages never
+share a document or a sentence with test pages, and the seen and unseen font sets share their text.
+Why: 300 dpi is how books are scanned and what Tesseract expects; one renderer keeps Devanagari
+shaping identical across milestones; the same text in both font sets compares like for like. The
+page text comes from the documents M2's validation lines came from, so a few sentences may overlap;
+those lines only chose M2's checkpoint.
+
+**31. Three line finders, and the true lines.**
+What: Tesseract's own page analysis (page mode 3); a classical finder written for DocLens (decision
+35); docTR's pretrained DBNet (ResNet 50) with docTR's own grouping of words into lines and its
+reading order, also scored in docTR's default order (top to bottom, left to right); and the true
+lines. Every finder's lines are read by the same recognizer (decision 33); Tesseract is also scored
+reading its own lines.
+Why: the true lines show what reading alone costs, so the rest of each finder's error is finding;
+Tesseract is the baseline of the whole project; the classical finder is computer vision from first
+principles; docTR is a learned detector. Why docTR's DBNet: Apache 2.0, PyTorch, a standard detector,
+ready to use. Why not train a detector of our own: hours of training for a part where a strong open
+one exists; DocLens's from scratch model is its recognizer. Why not Surya or PaddleOCR here: they are
+compared whole in M5.
+
+**32. Lines are quadrilaterals; Tesseract's are rebuilt from its words.**
+What: every line, true or found, is four corners at any angle. Tesseract's line is the smallest
+rectangle around the words it put in the line.
+Why: on a turned page an upright box covers parts of the lines above and below. On a page turned by
+a few degrees, Tesseract's own upright line boxes matched 7 of 32 true lines while it read the page
+with 1.5% CER; rebuilt from its words, 31 of 32 matched.
+
+**33. One recognizer for every finder: M2's CRNN.**
+What: greedy decoding; each line cut out along its quadrilateral, turned level, with 15% of its
+height of page around it; a line wider than 24 times its height is cut at the gap between words
+nearest its middle and the pieces' readings joined.
+Why greedy: in M2, beam search with TinyGPT changed the main model's CER by at most 0.13 points, and
+the page sets hold about 15,000 lines. Why level crops: skew was the CRNN's weakest damage in M2.
+Why cut long lines: M2 trained on lines up to 24 times as wide as high, and half the lines of a one
+column page are wider; squeezing them would distort every letter.
+
+**34. Page scores.**
+What: page CER on text with every run of spaces and line breaks made one space; line precision,
+recall and F1 at an IoU of 0.5 between quadrilaterals, one to one; splits and merges; Kendall's tau
+of the reading order of matched lines; seconds per page; bootstrap intervals over pages and a
+paired comparison with Tesseract.
+Why page CER: it is what a reader of the page gets, and it charges a finder for missed lines,
+merged lines (read badly) and a wrong order, while a line cut in two costs nothing if its pieces
+are read in order. Why IoU 0.5: ICDAR's text detection protocol. Why splits, merges and tau: they
+say why a finder fails.
+
+**35. The classical line finder.**
+What: Sauvola binarisation; the page levelled by M1's skew estimate; components, without specks,
+frames and separator dashes; a recursive XY cut over the components that cuts columns first,
+searches gaps between columns at slight slants, cuts columns only between sides of about the same
+width with a gap much narrower than they are, and cuts off a title or a page number that reaches
+into the gap; in each block, lines from the rows of ink, each block levelled again by its own angle
+(doclens/layout.py).
+Why: the XY cut is the classic, explainable way to find blocks, and its cut order is a reading
+order. The column rules come from what failed on the validation pages and receipts: a receipt's
+prices beside its item names looked like a column; photographed pages tilt their columns by
+different angles; a centred title blocks the gap between the columns below it; a paragraph's short
+last line has too little ink to count as a line against a page wide threshold. Settings (Sauvola's
+k 0.1 and window of 3 text heights, a closing of 3 pixels) were chosen on the validation pages and
+CORD's validation receipts by the mean of their line F1, never on a test set: 0.999 on the pages and
+0.59 on the receipts.
 
 ## Decisions ahead
 
@@ -360,4 +497,5 @@ Recorded here when each milestone is built. Already known:
 
 Everything that produces a number runs on the M2 MacBook. M1 needs only the CPU (Tesseract uses
 every core); M2 trains on the Apple GPU through PyTorch's MPS backend, with data workers on the
-CPU cores. GitHub Actions runs the tests on Linux after every push.
+CPU cores. M3 runs Tesseract on every core, docTR's detector and the CRNN on the Apple GPU. GitHub
+Actions runs the tests on Linux after every push.

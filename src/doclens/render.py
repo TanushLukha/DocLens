@@ -22,6 +22,7 @@ class Rendered:
     text: str
     fonts: tuple[str, ...]
     size: int
+    baseline: int = 0            # row of the baseline in the image (pages line up their lines by it)
 
 
 def runs(text: str, deva: Font, latn: Font, latin_in_deva_font: bool) -> list[tuple[str, Font]]:
@@ -45,6 +46,11 @@ def runs(text: str, deva: Font, latn: Font, latin_in_deva_font: bool) -> list[tu
     return out
 
 
+def text_width(text: str, deva: Font, latn: Font, size: int, latin_in_deva_font: bool = True) -> float:
+    """The advance width of a line in pixels, as render_line would draw it (for wrapping text)."""
+    return sum(f.pil(size).getlength(s) for s, f in runs(text, deva, latn, latin_in_deva_font))
+
+
 def render_line(text: str, deva: Font, latn: Font, size: int, *, latin_in_deva_font: bool = True,
                 ink: int = 20, paper: int = 245, pad: tuple[int, int, int, int] = (12, 10, 12, 10)) -> Rendered:
     """Render one line. pad is (left, top, right, bottom) in pixels around the ink."""
@@ -62,4 +68,4 @@ def render_line(text: str, deva: Font, latn: Font, size: int, *, latin_in_deva_f
     draw = ImageDraw.Draw(img)
     for x0, s, pil in boxes:
         draw.text((pad[0] + x0, pad[1] + above), s, font=pil, fill=ink, anchor="ls")
-    return Rendered(np.asarray(img), text, tuple(dict.fromkeys(f.name for _, f in parts)), size)
+    return Rendered(np.asarray(img), text, tuple(dict.fromkeys(f.name for _, f in parts)), size, pad[1] + above)

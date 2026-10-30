@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M2 in one go: training data, preparation, tests, the benchmark, training, evaluation.
+# M2 in one go: training data, preparation, tests, the benchmark, both training runs, evaluation.
 #   bash scripts/run_m2.sh                 (extra arguments go to train_crnn.py, e.g. --height 32)
 # Run it with the environment active (source .venv/bin/activate), TinyGPT next to DocLens.
 set -euo pipefail
@@ -18,4 +18,7 @@ python -m pytest -q
 python scripts/bench_m2.py
 python scripts/train_crnn.py --run main "$@"
 python scripts/eval_crnn.py --run main
-echo "M2 done: docs/results/m2_crnn.md"
+python scripts/train_crnn.py --run synthetic --synthetic-only "$@"
+python scripts/eval_crnn.py --run synthetic
+python scripts/compare_runs.py main synthetic
+echo "M2 done: docs/results/m2_crnn.md and docs/results/m2_main_vs_synthetic.md"

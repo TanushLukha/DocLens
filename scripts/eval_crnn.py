@@ -40,13 +40,7 @@ from doclens.recognize import Recognizer  # noqa: E402
 from doclens.text import normalize  # noqa: E402
 from doclens.traindata import val_sets  # noqa: E402
 
-TEST = {
-    "synth_seen": lambda: datasets.synth("test_seen"),
-    "synth_unseen": lambda: datasets.synth("test_unseen"),
-    "mozhi": lambda: datasets.mozhi("test"),
-    "cord_word": lambda: datasets.cord("test", "word"),
-    "cord_line": lambda: datasets.cord("test", "line"),
-}
+TEST = datasets.TEST_SETS
 DECODERS = ("greedy", "beam", "beam_lm")
 M1 = REPO / "runs" / "m1"
 OUT = REPO / "docs" / "results"

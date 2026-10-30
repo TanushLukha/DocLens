@@ -236,3 +236,13 @@ def crops(folder: Path, level: str | None = None) -> list[Item]:
             items.append(Item(r["text"], {"set": folder.name, "id": r["id"], "script": r["script"], "level": r["level"]},
                               folder / r["file"]))
     return items
+
+
+# M1's test sets, under the names every results file uses (read once, at the end of a milestone)
+TEST_SETS = {
+    "synth_seen": lambda: synth("test_seen"),
+    "synth_unseen": lambda: synth("test_unseen"),
+    "mozhi": lambda: mozhi("test"),
+    "cord_word": lambda: cord("test", "word"),
+    "cord_line": lambda: cord("test", "line"),
+}

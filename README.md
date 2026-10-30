@@ -15,11 +15,15 @@ consonant, so a word cannot be cut into separate characters the way an English w
 | Status | Milestone | What gets built |
 |---|---|---|
 | ✅ done | **M1 Baseline** | test sets (real Hindi words, real receipt words and lines, synthetic lines under eight kinds of damage); CER and WER; Tesseract measured three ways; OpenCV image cleaning compared |
-| in progress | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words and receipts; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw, with intervals and paired tests against Tesseract |
-| planned | **M3 Pages** | finding lines and blocks (classical against learned), reading order, whole page accuracy |
+| ✅ done | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words and receipts; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw, with intervals and paired tests against Tesseract |
+| in progress | **M3 Pages** | finding lines on whole pages (a classical finder against docTR's detector and Tesseract), reading order, whole page accuracy, on synthetic Hindi and English pages and real receipts |
 | planned | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
 | planned | **M5 Comparison** | DocLens against PaddleOCR, Surya, EasyOCR and a small vision language model: accuracy, speed, memory, licence |
 | planned | **M6 Ship** | FastAPI service, Docker image, ONNX export, a demo that runs in the browser |
+
+**M2 in one line:** a CRNN of 4.1 million parameters, trained from scratch on a laptop, reads
+every test set better than Tesseract without being told the language: 0.6% CER on printed Hindi
+words against 6.5%, 2.7% on receipt lines against 42.8% (results below).
 
 The plan, the data and every design decision (what, why, and why not the alternatives) are in
 [docs/PLAN.md](docs/PLAN.md).
@@ -88,11 +92,23 @@ pytest -q
 python scripts/bench_m2.py                            # what a training step costs on this Mac
 caffeinate -i python scripts/train_crnn.py --run main # the long run; add --resume to continue one
 python scripts/eval_crnn.py --run main                # the test sets, against Tesseract
+caffeinate -i python scripts/train_crnn.py --run synthetic --synthetic-only
+python scripts/eval_crnn.py --run synthetic           # the same model trained on synthetic lines only
+python scripts/compare_runs.py main synthetic         # what the real training images add
 ```
 
 Or all of it in one go: `bash scripts/run_m2.sh`. Training runs can be compared in MLflow:
 `mlflow ui --backend-store-uri sqlite:///runs/mlflow.db`. Every push is checked by GitHub Actions
 (lint, types, tests): `.github/workflows/ci.yml`.
+
+## Run M3 on a Mac
+
+```bash
+pip install -e ".[pages]"                             # docTR; its detector downloads on first use
+python scripts/make_pages.py                          # synthetic page sets: val, test_seen, test_unseen
+python scripts/eval_pages.py --quick                  # 2 pages per set, layout and condition
+python scripts/eval_pages.py                          # every page, results to docs/results/m3_pages.md
+```
 
 ## Results (M1, the Tesseract baseline)
 
@@ -143,6 +159,67 @@ These are the numbers M2's recognizer has to beat, on the same images with the s
   4.2%): the six held out fonts are plain book faces, while the training fonts include decorative
   ones.
 
+## Results (M2, the recognizer)
+
+One CRNN of 4.1 million parameters, trained from scratch on the M2 MacBook's GPU (20,000 steps,
+about 2 million samples drawn fresh, 2 h 38 min with validation; the best checkpoint came at step
+18,000), reads every set with one alphabet and is never told the language. It decodes with beam
+search and TinyGPT rescoring; Tesseract reads each set in its own language, as in M1. Same images,
+same scorer, CER with a bootstrap 95% interval. Every table is in
+[docs/results/m2_crnn.md](docs/results/m2_crnn.md).
+
+| Set | Images | Tesseract | CRNN | CRNN against Tesseract | Read perfectly, Tesseract and CRNN |
+|---|---:|---:|---:|---:|---:|
+| Mozhi words | 10,173 | 6.5% (6.2 to 6.9) | 0.6% (0.5 to 0.7) | 5.9 points fewer | 84.5% and 98.1% |
+| Synthetic, seen fonts | 5,736 | 4.2% (3.9 to 4.4) | 0.7% (0.6 to 0.8) | 3.5 fewer | 59.3% and 89.3% |
+| Synthetic, unseen fonts | 5,728 | 3.2% (3.0 to 3.4) | 0.8% (0.8 to 0.9) | 2.4 fewer | 62.4% and 84.9% |
+| CORD words | 2,356 | 19.9% (18.4 to 21.4) | 1.3% (1.1 to 1.6) | 18.5 fewer | 62.9% and 94.6% |
+| CORD lines | 791 | 42.8% (39.5 to 46.1) | 2.7% (2.1 to 3.2) | 40.1 fewer | 28.8% and 79.1% |
+
+Every difference has p < 0.001 in a paired bootstrap over the same images. The main model trains
+on synthetic lines, Mozhi's training words and CORD's training receipts, none of which Tesseract
+has seen. A second run with the same settings on synthetic lines only shows what the real images
+add ([docs/results/m2_main_vs_synthetic.md](docs/results/m2_main_vs_synthetic.md)):
+
+| Set | Synthetic lines only | Main model | Main against synthetic only |
+|---|---:|---:|---:|
+| Mozhi words | 3.9% | 0.6% | 3.2 points fewer (3.0 to 3.4) |
+| CORD words | 16.8% | 1.3% | 15.4 fewer (14.3 to 16.6) |
+| CORD lines | 19.9% | 2.7% | 17.3 fewer (15.8 to 18.8) |
+| Synthetic, seen fonts | 0.5% | 0.7% | 0.20 more (0.16 to 0.24) |
+| Synthetic, unseen fonts | 0.7% | 0.8% | 0.16 more (0.12 to 0.20) |
+
+* **Trained on synthetic lines only, it still beats Tesseract on every set** (Mozhi 3.9% against
+  6.5%, CORD words 16.8% against 19.9%, CORD lines 19.9% against 42.8%; p < 0.001 each). That is
+  the fair comparison with a reader that never saw these sources. The real training images then
+  cut the error on them by 84% to 92%, for 0.2 points more on the synthetic lines.
+* **A lone danda, again.** The synthetic only model misreads all 576 of Mozhi's test words that
+  are a lone danda (334 as I, 213 as |), 40% of its errors there: only 0.05% of the words in the
+  synthetic training text stand alone as a danda, against 5.5% of Mozhi's training words. The main
+  model misreads 3 of the 576.
+* **Fonts it never saw:** 0.8% CER on the six held out fonts, against 0.7% on the training fonts
+  and Tesseract's 3.2%.
+* **Damage no longer matters, except skew.** Under blur, noise, low resolution, JPEG, shadow and
+  phone photos the CRNN stays between 0.3% and 0.6% (Tesseract 2.4% to 6.5%). Lines turned by 2
+  to 5 degrees are the exception: 2.7% and 3.0%, and they hold about half of all its errors on
+  the synthetic lines (50% with seen fonts, 45% with unseen ones).
+* **Mixed lines are still the hardest:** 1.5% and 1.6%, against 0.6% to 0.8% for Hindi lines,
+  0.3% to 0.4% for English lines and Tesseract's 6.5% on mixed lines.
+* **One model, almost no wrong script.** Told both languages, Tesseract writes 7.9% of the
+  synthetic lines (seen fonts) partly in the wrong script; the CRNN, told nothing, 0.02%.
+* **TinyGPT helps where the pixels leave doubt.** For the main model, rescoring takes the unseen
+  fonts from 0.96% to 0.83% CER (WER 4.7% to 4.0%) and changes nothing measurable on Mozhi and
+  CORD (p 0.88, 0.41 and 0.07 against greedy decoding). For the synthetic only model, less sure of
+  real images, it cuts Mozhi from 4.6% to 3.9% and CORD words from 19.0% to 16.8%.
+* **What is left in Hindi** is mostly punctuation and look alike vowel signs: curly quotes read as
+  straight ones, ू and ु swapped, a colon read as a visarga (ः), ि read as े.
+* **Speed.** On the Mac's GPU the CRNN reads 228 synthetic lines per second (Tesseract, on all CPU
+  cores: 32) and 900 Mozhi words (Tesseract: 511). On the CPU alone it is faster on lines (58
+  against 32) but slower on words (288 against 511) and receipt lines (55 against 215).
+* **Training memory:** 5.3 to 5.6 GB of GPU memory for the whole run, after a first attempt ran
+  out of memory: PyTorch on the Apple GPU keeps a compiled graph for every batch shape, so training
+  and reading use five fixed shapes (decision 21 in the plan).
+
 ## Layout
 
 ```
@@ -163,8 +240,15 @@ src/doclens/
   recognize.py    reading crops with a trained model, in five fixed batch shapes
   lm.py           TinyGPT rescoring, and choosing its weights on validation data
   stats.py        bootstrap intervals and paired comparisons
+  pages.py        pages and their lines: page sets on disk, CORD receipts as pages, line crops
+  pagegen.py      synthetic pages: layout, drawing, damage that moves the lines with the pixels
+  layout.py       the classical line finder: binarisation, levelling, XY cut, lines from rows of ink
+  doctr_lines.py  docTR's pretrained detector, its lines and reading order
+  pagereader.py   reading a page's lines with the CRNN
+  pagescore.py    page CER, line matching, splits and merges, reading order
 scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh,
-                  prepare_m2, bench_m2, train_crnn, eval_crnn, run_m2.sh
+                  prepare_m2, bench_m2, train_crnn, eval_crnn, compare_runs, run_m2.sh,
+                  make_pages, eval_pages
 tests/            unit tests for all of the above
 .github/          CI: lint, type checks and tests on every push
 fonts/            35 font files with their licences (fonts/README.md)
