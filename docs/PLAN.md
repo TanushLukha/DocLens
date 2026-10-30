@@ -483,6 +483,42 @@ k 0.1 and window of 3 text heights, a closing of 3 pixels) were chosen on the va
 CORD's validation receipts by the mean of their line F1, never on a test set: 0.999 on the pages and
 0.59 on the receipts.
 
+## What M3 found, and what it means for M4
+
+The full tables are in `docs/results/m3_pages.md`, the headline numbers and findings in the README.
+
+* **The error left on a page is in finding its lines.** The CRNN reads the true lines at 0.1% and
+  0.5% CER on the synthetic pages and 1.9% on CORD's receipts; the best finder on each set leaves
+  4.8%, 5.9% and 5.6%. Whole pages now get better through better finding, not a better recognizer.
+* **M4 reads receipts with docTR's detector in its top to bottom order.** On CORD that gives 5.6%
+  page CER, against 51.8% for Tesseract and 44.2% for the classical finder, whose rules were
+  written for pages. M4 extracts fields from the true text and from this OCR text, so what
+  reading errors cost the fields is measured, not assumed.
+* **Line F1 can mislead, so M4 is scored end to end.** docTR has the lowest line F1 on the
+  receipts (13.8: it finds names, quantities and prices as separate pieces where CORD has one row)
+  and the best page CER. M4 reports field F1 on OCR text, not detection scores.
+* **Reading order must fit the document.** docTR's reading order is needed for columns (6.6%
+  against 44.9% top to bottom) and wrong for receipts (47.1% against 5.6%), where it takes the
+  prices for a column. A service for both kinds of document must tell them apart or use an order
+  that handles both; decided when the service is built (M6).
+* **Two faults, to be fixed without touching the test pages.** The classical finder's rule for a
+  title or a page number in the gap between columns (decision 35) cut off strips many lines tall
+  on 13 and 15 two column test pages, and one test page design draws a web address across both
+  columns. The rule's fault showed once on the validation pages too (a photo whose reading order
+  came out at a tau of 0.81), but settings were chosen by line F1, which cannot see reading order;
+  from now on they are chosen by page CER, which can. Fixing either fault and scoring the same
+  test pages again would tune DocLens on its test set, so the fixes are checked on validation
+  pages and on new test pages drawn with a new seed.
+* **docTR's detector needs level pages.** On pages turned by 1 to 4 degrees it cuts 50% to 63% of
+  the lines into pieces, and on two columns its reading order then fails (34.2% and 35.6%).
+  Levelling each page with the skew estimate before docTR sees it is the fix to try, in M5.
+* **Level crops settled skew.** Cut along their quadrilaterals and turned level, the true lines
+  of turned pages read as well as those of clean pages (0.1% and 0.5%), so training on more skew,
+  planned after M2, was not run.
+* **Reading is the slow part.** Per page, finding takes 0.21 s (classical finder, CPU) or 0.32 s
+  (docTR, GPU) and reading 0.8 to 0.9 s on the GPU, against Tesseract's 12 s on one core. M6
+  measures reading on CPUs, and batching lines across pages.
+
 ## Decisions ahead
 
 Recorded here when each milestone is built. Already known:

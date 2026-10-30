@@ -16,7 +16,7 @@ consonant, so a word cannot be cut into separate characters the way an English w
 |---|---|---|
 | ✅ done | **M1 Baseline** | test sets (real Hindi words, real receipt words and lines, synthetic lines under eight kinds of damage); CER and WER; Tesseract measured three ways; OpenCV image cleaning compared |
 | ✅ done | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words and receipts; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw, with intervals and paired tests against Tesseract |
-| in progress | **M3 Pages** | finding lines on whole pages (a classical finder against docTR's detector and Tesseract), reading order, whole page accuracy, on synthetic Hindi and English pages and real receipts |
+| ✅ done | **M3 Pages** | finding lines on whole pages (a classical finder against docTR's detector and Tesseract), reading order, whole page accuracy, on synthetic Hindi and English pages and real receipts |
 | planned | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
 | planned | **M5 Comparison** | DocLens against PaddleOCR, Surya, EasyOCR and a small vision language model: accuracy, speed, memory, licence |
 | planned | **M6 Ship** | FastAPI service, Docker image, ONNX export, a demo that runs in the browser |
@@ -24,6 +24,11 @@ consonant, so a word cannot be cut into separate characters the way an English w
 **M2 in one line:** a CRNN of 4.1 million parameters, trained from scratch on a laptop, reads
 every test set better than Tesseract without being told the language: 0.6% CER on printed Hindi
 words against 6.5%, 2.7% on receipt lines against 42.8% (results below).
+
+**M3 in one line:** on whole pages the error left is in finding the lines, not in reading them:
+the CRNN reads the true lines at 0.1% to 1.9% CER; with DocLens's classical line finder it reads
+synthetic pages at 4.8% (Tesseract 12.2%), and with docTR's detector real receipts at 5.6%
+(Tesseract 51.8%).
 
 The plan, the data and every design decision (what, why, and why not the alternatives) are in
 [docs/PLAN.md](docs/PLAN.md).
@@ -219,6 +224,88 @@ add ([docs/results/m2_main_vs_synthetic.md](docs/results/m2_main_vs_synthetic.md
 * **Training memory:** 5.3 to 5.6 GB of GPU memory for the whole run, after a first attempt ran
   out of memory: PyTorch on the Apple GPU keeps a compiled graph for every batch shape, so training
   and reading use five fixed shapes (decision 21 in the plan).
+
+## Results (M3, whole pages)
+
+Three line finders on 300 synthetic A4 pages (Hindi, English and mixed text in one and two
+columns, clean and under four kinds of damage; 150 pages in the training fonts, the same 150 in
+six held out fonts) and on CORD's 100 test receipts: Tesseract's own page analysis, DocLens's
+classical finder, and docTR's pretrained detector, in docTR's reading order and in its plain top
+to bottom order. M2's CRNN reads every finder's lines, and the true lines too, which shows what
+reading alone costs. Page CER with a bootstrap 95% interval over pages; every table is in
+[docs/results/m3_pages.md](docs/results/m3_pages.md).
+
+| Reader | Synthetic, seen fonts | Synthetic, unseen fonts | CORD receipts |
+|---|---:|---:|---:|
+| Tesseract | 12.2% (9.5 to 15.0) | 12.5% (9.9 to 15.4) | 51.8% (44.6 to 59.5) |
+| Tesseract's lines, CRNN | 10.6% (7.8 to 13.5) | 11.6% (8.8 to 14.4) | 48.1% (40.6 to 56.3) |
+| Classical finder, CRNN | **4.8%** (2.8 to 7.1) | **5.9%** (3.7 to 8.2) | 44.2% (34.6 to 55.6) |
+| docTR in its reading order, CRNN | 6.6% (4.3 to 9.3) | 7.6% (5.1 to 10.5) | 47.1% (42.0 to 51.7) |
+| docTR top to bottom, CRNN | 44.9% (39.4 to 50.1) | 45.6% (40.2 to 50.6) | **5.6%** (3.6 to 8.0) |
+| True lines, CRNN | 0.1% (0.1 to 0.2) | 0.5% (0.4 to 0.6) | 1.9% (1.3 to 2.5) |
+
+In a paired bootstrap over the same pages, the classical finder has 7.4 and 6.7 points fewer than
+Tesseract on the synthetic pages (p < 0.001 each), docTR in its reading order 5.6 and 4.9 fewer
+(p 0.006 and 0.011), and docTR top to bottom 46.1 fewer on the receipts (p < 0.001). On the
+receipts neither the classical finder nor docTR's reading order is measurably better than
+Tesseract (p 0.19 and 0.26).
+
+Synthetic pages in the training fonts, by damage and by layout:
+
+| Reader | clean | noise | shadow | skew | photo | one column | two columns |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Tesseract | 2.8% | 3.8% | 24.1% | 11.8% | 18.5% | 15.0% | 9.7% |
+| Classical finder, CRNN | 3.2% | 3.4% | 3.3% | 4.3% | 9.8% | 1.1% | 8.1% |
+| docTR in its reading order, CRNN | 1.3% | 1.3% | 1.4% | 18.8% | 10.3% | 1.6% | 11.1% |
+| True lines, CRNN | 0.1% | 0.1% | 0.1% | 0.1% | 0.1% | 0.1% | 0.1% |
+
+* **Reading is nearly solved; finding the lines is what is left.** The CRNN reads the true lines
+  at 0.1% and 0.5% CER on the synthetic pages and 1.9% on the receipts. The best finder on each
+  set still leaves 4.8%, 5.9% and 5.6%.
+* **The classical finder is best on synthetic pages, and its errors sit on a few of them.** Line
+  F1 97.3 and 98.3 (Tesseract 92.2 and 92.9), a median page at 0.22% and 0.38% CER, and 0.2% to
+  0.6% on one column pages other than photos. Two columns are its weak spot: it reads 14 and 19
+  of the 75 two column pages in the wrong order, most of them in strips (the top of both columns,
+  then the bottom of both: 3 switches between the columns where 1 is right), and those pages
+  hold 66% and 69% of its errors. On all but 1 and 4 of them (those on the page design of the
+  next point), the rule that cuts off a title or a page number reaching into the gap between the
+  columns (decision 35 in the plan) cut off a strip many lines tall instead (36 line pitches on
+  latn_2col_03). That happened on none of the 61 two column pages it read in order in the
+  training fonts, and on 1 of 56 in the unseen fonts. On photos of two column pages it also
+  merges lines (65 and 56 merges on 15 pages).
+* **One page design is flawed.** On latn_2col_01 a web address wider than its column runs into
+  the column beside it, so two true lines overlap and every finder's reading order breaks. Its 5
+  pages in each font set hold 34% and 32% of the classical finder's errors (docTR 16% and 22%,
+  Tesseract 6% and 10%). Without them the classical finder reads 3.3% and 4.1%, docTR 5.7% and
+  6.2%, Tesseract 11.8% and 11.8%; every other number here keeps them.
+* **docTR's detector is best on level pages and cuts lines into pieces on turned ones.** On clean
+  pages it reads 1.3% and 2.9% (classical finder 3.2% and 4.8%, Tesseract 2.8% and 4.9%). On
+  pages turned by 1 to 4 degrees it cuts 50% to 63% of the lines into pieces. Read in order,
+  the pieces cost little on one column (1.6% and 2.0%); on two columns its reading order then
+  jumps between the columns, and it reads 34.2% and 35.6%.
+* **Reading order has to fit the document.** docTR's reading order is what makes columns work:
+  top to bottom, it reads across both columns (49 to 79 switches between them on a clean page),
+  44.9% and 45.6%. On receipts it is the other way round: its reading order takes the prices for a
+  column and reads every item name before every price (47.1%), while top to bottom keeps each
+  name with its price (5.6%).
+* **On receipts only docTR's detector finds the text well.** Read top to bottom, it gives the
+  best page CER with the lowest line F1 (13.8): it finds names, quantities and prices as separate
+  pieces where CORD has one row (81% of the rows come in pieces), so F1 at an IoU of 0.5 says
+  little about what a reader gets. Tesseract leaves text out: 71% of its edits are characters it
+  never wrote, and half the receipts come out above 50% CER. The classical finder adds text: 223
+  of its 1,180 lines lie mostly outside every true line (such as separator lines that CORD does
+  not mark), and 62% of its edits are characters that are not there.
+* **Tesseract loses text in shadows.** Under a shadow it finds 76% and 78% of the lines and reads
+  24.1% and 23.9%; the CRNN reading Tesseract's lines does no better (23.0% and 23.3%), so the
+  loss is in finding. The classical finder, binarising with Sauvola's local threshold, reads the
+  same pages at 3.3% and 3.6%.
+* **Level crops end the skew problem.** Cut out along their quadrilaterals and turned level, the
+  true lines of turned pages read at 0.1% and 0.5%, as on clean pages (M2's test lines, turned
+  inside their crops by 2 to 5 degrees: 2.7% and 3.0%). Training on more skew, planned after M2,
+  was therefore not run.
+* **Speed.** Per page, finding the lines takes 0.21 s for the classical finder (on the CPU) and
+  0.32 s for docTR (on the GPU); reading them with the CRNN 0.8 to 0.9 s on the GPU. Tesseract
+  takes 12 s per page on one core.
 
 ## Layout
 
