@@ -17,7 +17,7 @@ consonant, so a word cannot be cut into separate characters the way an English w
 | ✅ done | **M1 Baseline** | test sets (real Hindi words, real receipt words and lines, synthetic lines under eight kinds of damage); CER and WER; Tesseract measured three ways; OpenCV image cleaning compared |
 | ✅ done | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words and receipts; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw, with intervals and paired tests against Tesseract |
 | ✅ done | **M3 Pages** | finding lines on whole pages (a classical finder against docTR's detector and Tesseract), reading order, whole page accuracy, on synthetic Hindi and English pages and real receipts |
-| planned | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
+| in progress | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
 | planned | **M5 Comparison** | DocLens against PaddleOCR, Surya, EasyOCR and a small vision language model: accuracy, speed, memory, licence |
 | planned | **M6 Ship** | FastAPI service, Docker image, ONNX export, a demo that runs in the browser |
 
@@ -114,6 +114,19 @@ python scripts/make_pages.py                          # synthetic page sets: val
 python scripts/eval_pages.py --quick                  # 2 pages per set, layout and condition
 python scripts/eval_pages.py                          # every page, results to docs/results/m3_pages.md
 ```
+
+## Run M4 on a Mac
+
+```bash
+pip install -e ".[fields]"                          # Hugging Face transformers; the models download on first use
+python scripts/prepare_m4.py                        # the OCR words of every receipt (docTR's detector, the CRNN)
+python scripts/bench_m4.py                          # one vocabulary? receipt lengths, speed and memory per model
+caffeinate bash scripts/run_m4.sh                   # every training run, then the evaluation (about 5 hours)
+```
+
+`scripts/run_m4.sh` trains the three models with three seeds each, the papers' box setting once as a
+check, and LiLT on OCR words, then scores every run on the test receipts
+(`docs/results/m4_fields.md`). A finished run is skipped when the script starts again.
 
 ## Results (M1, the Tesseract baseline)
 
@@ -329,9 +342,11 @@ src/doclens/
   doctr_lines.py  docTR's pretrained detector, its lines and reading order
   pagereader.py   reading a page's lines with the CRNN
   pagescore.py    page CER, line matching, splits and merges, reading order
+  fields.py       receipts as tagged words (CORD's fields), OCR words, field F1
+  kie.py          the three field extractors: windows, batches, training, tagging
 scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh,
                   prepare_m2, bench_m2, train_crnn, eval_crnn, compare_runs, run_m2.sh,
-                  make_pages, eval_pages
+                  make_pages, eval_pages, prepare_m4, bench_m4, train_kie, eval_kie, run_m4.sh
 tests/            unit tests for all of the above
 .github/          CI: lint, type checks and tests on every push
 fonts/            35 font files with their licences (fonts/README.md)

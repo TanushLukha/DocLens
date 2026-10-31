@@ -563,12 +563,82 @@ the headline numbers and findings in the README.
   0.34 s (docTR, GPU) and reading 0.8 to 1.1 s on the GPU, against Tesseract's 11 to 12 s on one
   core. M6 measures reading on CPUs, and batching lines across pages.
 
+## Decisions in M4
+
+**38. Fields: CORD's groups, tagged word by word, in reading order.**
+What: CORD's 800 training, 100 validation and 100 test receipts. Every annotated word carries the
+category of its group (menu.nm, menu.price, total.total_price and so on), as a BIO tag: B on the
+group's first word, I on the rest. Words are read in reading order, CORD's rows top to bottom and
+each row left to right, the order docTR's rows give OCR words (M3); the label list holds every
+category of the three splits. The receipt image is masked to the annotated part, as in M3.
+Why: one tag per word is how LayoutLMv3 and LiLT were evaluated on CORD, so the code can be
+checked against their numbers (decision 40). Why reading order and not the order of CORD's JSON:
+OCR words have no JSON, and true and OCR words must reach a model in the same order, or the
+comparison between them measures the order and not the reading. Why CORD: its items, counts,
+prices and totals are what a user wants from a receipt, its split is the one the papers use, and
+M1 to M3 already read it.
+
+**39. Three models on one vocabulary.**
+What: RoBERTa base (the words alone), LiLT on RoBERTa base (the words and their boxes; MIT, the
+model to ship) and LayoutLMv3 base (words, boxes and the image; its weights are CC BY NC SA 4.0,
+so it is for comparison only). All three use RoBERTa's byte level BPE vocabulary, so one
+tokenizer turns a receipt into the same tokens for each; scripts/bench_m4.py checks that LiLT's and
+LayoutLMv3's own vocabularies are RoBERTa's. A word's tag is read from its first token.
+Why: LiLT's text stream starts from RoBERTa base's weights, so LiLT against RoBERTa isolates what
+the boxes add, and LayoutLMv3 against LiLT what the image adds. Why base and not large: three
+models and several seeds must train on one Mac. Why not LayoutLMv2 or LayoutXLM: older and need
+detectron2; why not an OCR free model (Donut): whole systems are compared in M5.
+
+**40. Training: fixed lengths, 0.00005 for 2,000 steps, the best validation field F1 kept, three
+seeds; the papers' boxes only as a check.**
+What: receipts are cut into windows of whole words of at most 384 tokens and padded to 128, 256
+or 384 tokens, so the Apple GPU sees three shapes (decision 21); batches of 8 windows of one length,
+the windows left over at a length carried up to the next, so every window trains once an epoch.
+AdamW at a learning rate of 0.00005, a linear warmup over the first 10% of 2,000 steps (20 epochs)
+and a linear decay to zero; every 100 steps the model tags the validation receipts and the weights
+with the best field F1 are kept; three seeds per model (scripts/run_m4.sh). Every word gets its
+own box. Once per layout model, the papers' setting is run as a check: every word given its whole
+field's box (segment boxes), on which LayoutLMv3 base reports 96.56 entity F1 and LiLT 96.07.
+Why: scripts/bench_m4.py found CORD's training receipts short (762 of the 800 fit 128 tokens, the
+longest 296), so 384 tokens hold every one, and the largest GPU pool it saw, 11.7 GB for LayoutLMv3
+at 512 tokens, is a reason to stop below 512. Hugging Face's example for LayoutLMv3 on CORD trains
+at 0.00005, scores every 100 steps and keeps the best model by F1, for 1,000 steps; 2,000 give LiLT
+and RoBERTa room, and the best validation step is kept anyway. The benchmark measured 0.38, 0.46
+and 1.09 s a step at 128 tokens for RoBERTa, LiLT and LayoutLMv3 (13, 16 and 37 minutes for 2,000
+steps), so three seeds of each fit in a night. Why three seeds: runs differ (LayoutMask's ablation
+reports spreads of 0.12 to 0.45 points between runs on CORD and FUNSD), and a difference between
+models should be larger than that. Why the field's box only as a check: it tells the model where
+each field starts and ends ("every entity in FUNSD and CORD exactly shares the same segment", from
+LayoutMask's ablation, where word boxes cost that model 0.7 points of F1 on CORD and 9.4 on FUNSD),
+and no OCR knows a receipt's fields before they are found.
+
+**41. Test inputs: the true words and the OCR words; a field counts only when its text is exact.**
+What: every model reads the 100 test receipts twice: CORD's true words and boxes, and the OCR
+words, docTR's detector words read by M2's CRNN in docTR's top to bottom order (M3's best reader of
+receipts, 5.6% page CER; scripts/prepare_m4.py). Field F1 counts, per receipt, the (category,
+text) pairs found in both the truth and the prediction, texts compared without spaces; a bootstrap
+over receipts gives the intervals and pairs models on the same receipts. Two ceilings: perfect tags
+on the true words (99.7%, not 100: CORD sometimes makes a separator such as ":" a field of its own
+inside another field of the same category), and on the OCR words with the tags of the true words
+under them, which is what the OCR alone costs.
+Why exact text: a total with one wrong digit is a wrong total. Why without spaces: OCR and CORD
+cut a line into words differently ("SubTotal" against "Sub Total"). Why not seqeval's entity F1:
+it needs the true words, so it cannot score OCR text; field F1 scores both inputs the same way.
+Why also train on OCR words: models train on true words, as in the papers, and LiLT is also trained
+on the OCR words of the training receipts (their tags moved from the true words under them, three
+seeds), to see whether training on what the OCR gives closes the gap between true and OCR words.
+
+**42. What layout adds, and why a model decides.**
+What: LiLT and LayoutLMv3 are also scored with every word given the same box (the whole receipt),
+and LayoutLMv3 with a blank image; field F1 per category; each run's validation and test F1.
+Why: removing an input at test time shows how much a trained model leans on it, without training
+another model; per category F1 shows which fields layout helps (a price beside its item, a total
+at the bottom).
+
 ## Decisions ahead
 
 Recorded here when each milestone is built. Already known:
 
-* **M4 licences.** LayoutLMv3's model page lists CC BY NC SA 4.0 (non commercial) while its README
-  says MIT; LiLT is MIT. LiLT is the model to ship, LayoutLMv3 is for comparison only.
 * **M5 licences.** Surya's code is Apache 2.0 but its weights use a modified OpenRAIL M licence
   with limits on commercial use; PaddleOCR is Apache 2.0. The comparison reports licence next to
   accuracy, because it decides what can be shipped.

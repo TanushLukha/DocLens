@@ -6,7 +6,8 @@ reading order. DocLens uses the detector and that grouping exactly as docTR ship
 the lines with its own CRNN: docTR's recognizers know Latin script only.
 
 Two orders come out of one detection: docTR's reading order (keep_reading_order, which handles
-columns) and docTR's default, lines sorted top to bottom and left to right.
+columns) and docTR's default, lines sorted top to bottom and left to right. For receipts (M4) the
+words themselves come out too, in the default order.
 """
 from __future__ import annotations
 
@@ -32,26 +33,38 @@ class DoctrLines:
         }
         self.arch = arch
 
-    def __call__(self, page: np.ndarray) -> dict[str, list[np.ndarray]]:
-        """Line quadrilaterals in page pixels, in docTR's reading order ('order') and in its default
-        order ('rows')."""
+    def _documents(self, page: np.ndarray, names) -> tuple[dict, tuple[int, int]]:
+        """docTR's documents for one page, one per builder named; empty when nothing is found."""
         from doctr.utils.geometry import detach_scores
         rgb = cv2.cvtColor(page, cv2.COLOR_GRAY2RGB) if page.ndim == 2 else page
         h, w = rgb.shape[:2]
         found = list(self.det([rgb])[0].values())[0]
         if len(found) == 0:
-            return {name: [] for name in self.builders}
+            return {}, (h, w)
         boxes, scores = detach_scores([found])
         n = len(boxes[0])
-        out = {}
-        for name, builder in self.builders.items():
-            doc = builder([rgb], boxes, scores, [[("", 1.0)] * n], [(h, w)], [[{"value": 0, "confidence": None}] * n])
-            quads = []
-            for block in doc.pages[0].blocks:
-                for line in block.lines:
-                    g = np.asarray(line.geometry, np.float32)
-                    if g.shape == (2, 2):                          # a straight box: (x0, y0), (x1, y1)
-                        g = np.float32([[g[0, 0], g[0, 1]], [g[1, 0], g[0, 1]], [g[1, 0], g[1, 1]], [g[0, 0], g[1, 1]]])
-                    quads.append(order_quad(g * np.float32([w, h])))
-            out[name] = quads
-        return out
+        return {name: self.builders[name]([rgb], boxes, scores, [[("", 1.0)] * n], [(h, w)],
+                                          [[{"value": 0, "confidence": None}] * n]) for name in names}, (h, w)
+
+    @staticmethod
+    def _quad(geometry, w: int, h: int) -> np.ndarray:
+        g = np.asarray(geometry, np.float32)
+        if g.shape == (2, 2):                              # a straight box: (x0, y0), (x1, y1)
+            g = np.float32([[g[0, 0], g[0, 1]], [g[1, 0], g[0, 1]], [g[1, 0], g[1, 1]], [g[0, 0], g[1, 1]]])
+        return order_quad(g * np.float32([w, h]))
+
+    def __call__(self, page: np.ndarray) -> dict[str, list[np.ndarray]]:
+        """Line quadrilaterals in page pixels, in docTR's reading order ('order') and in its default
+        order ('rows')."""
+        docs, (h, w) = self._documents(page, self.builders)
+        return {name: [self._quad(line.geometry, w, h) for block in docs[name].pages[0].blocks for line in block.lines]
+                       if docs else [] for name in self.builders}
+
+    def words(self, page: np.ndarray) -> list[np.ndarray]:
+        """Word quadrilaterals in page pixels, in docTR's default order: its lines top to bottom,
+        the words of a line left to right (M4 reads receipts this way)."""
+        docs, (h, w) = self._documents(page, ["rows"])
+        if not docs:
+            return []
+        return [self._quad(word.geometry, w, h) for block in docs["rows"].pages[0].blocks
+                for line in block.lines for word in line.words]

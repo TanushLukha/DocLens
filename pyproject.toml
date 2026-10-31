@@ -19,6 +19,7 @@ train = ["torch>=2.6"]
 track = ["mlflow>=3.17"]
 lm = ["safetensors>=0.4"]
 pages = ["python-doctr==1.1.0"]
+fields = ["transformers==5.22.1"]
 dev = ["pytest>=7", "rapidfuzz>=3.0", "ruff>=0.15", "mypy>=1.11"]
 plot = ["matplotlib>=3.7"]
 

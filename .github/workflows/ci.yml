@@ -22,7 +22,7 @@ jobs:
       - name: Python packages, with the CPU build of PyTorch
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev]"
+          pip install -e ".[dev,fields]"
       - name: Lint
         run: ruff check .
       - name: Types
