@@ -121,7 +121,7 @@ python scripts/eval_pages.py                          # every page, results to d
 pip install -e ".[fields]"                          # Hugging Face transformers; the models download on first use
 python scripts/prepare_m4.py                        # the OCR words of every receipt (docTR's detector, the CRNN)
 python scripts/bench_m4.py                          # one vocabulary? receipt lengths, speed and memory per model
-caffeinate bash scripts/run_m4.sh                   # every training run, then the evaluation (about 5 hours)
+caffeinate bash scripts/run_m4.sh                   # every training run, then the evaluation (about 6 hours)
 ```
 
 `scripts/run_m4.sh` trains the three models with three seeds each, the papers' box setting once as a

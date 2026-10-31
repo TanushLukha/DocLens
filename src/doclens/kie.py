@@ -214,10 +214,16 @@ def micro_f1(rows: list[tuple[int, int, int]]) -> float:
 
 def train(model, kind: str, examples: list[Example], val: tuple[list[Receipt], list[Example]], labels: list[str],
           device, steps: int, batch_size: int = 8, lr: float = 5e-5, warmup: float = 0.1, eval_every: int = 100,
-          seed: int = 0, log: Callable[[dict], None] = print) -> tuple[dict, list[dict]]:
+          seed: int = 0, log: Callable[[dict], None] = print, micro: int | None = None) -> tuple[dict, list[dict]]:
     """AdamW with a linear warmup and decay; the weights with the best validation field F1 are kept.
-    Returns those weights (on the CPU) and the validation history."""
+    With `micro` smaller than the batch, each batch goes through the model in parts of that size
+    and their gradients add up before the step, weighted by their share of the batch's labelled
+    tokens: the same step as the whole batch, in less GPU memory. Validation uses the same part
+    size, so the GPU sees no other shapes. Returns the best weights (on the CPU) and the history."""
     import torch
+    micro = micro or batch_size
+    if batch_size % micro:
+        raise ValueError("the batch must split into whole parts")
     torch.manual_seed(seed)
     rng = random.Random(seed)
     model.to(device)
@@ -236,18 +242,28 @@ def train(model, kind: str, examples: list[Example], val: tuple[list[Receipt], l
     t0, losses = time.time(), []
     for step in range(1, steps + 1):
         model.train()
-        out = model(**tensors(next(stream), kind, device))
-        out.loss.backward()
+        batch = next(stream)
+        total = sum(int((e.labels != IGNORE).sum()) for e in batch)
+        loss = 0.0
+        for i in range(0, len(batch), micro):
+            part = batch[i:i + micro]
+            share = sum(int((e.labels != IGNORE).sum()) for e in part) / max(total, 1)
+            out = model(**tensors(part, kind, device))
+            (out.loss * share).backward()
+            loss += float(out.loss.detach()) * share
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         sched.step()
         opt.zero_grad(set_to_none=True)
-        losses.append(float(out.loss.detach()))
+        losses.append(loss)
         if step % eval_every == 0 or step == steps:
             receipts, vex = val
-            score = micro_f1(field_counts(receipts, predict(model, kind, receipts, vex, labels, device, batch_size)))
+            score = micro_f1(field_counts(receipts, predict(model, kind, receipts, vex, labels, device, micro)))
             row = {"step": step, "loss": float(np.mean(losses)), "val_f1": score, "lr": sched.get_last_lr()[0],
                    "seconds": time.time() - t0}
+            if getattr(device, "type", str(device)) == "mps":
+                torch.mps.empty_cache()                   # let go of what validation held before training goes on
+                row["gpu_gb"] = round(torch.mps.driver_allocated_memory() / 2**30, 2)
             losses = []
             history.append(row)
             log(row)

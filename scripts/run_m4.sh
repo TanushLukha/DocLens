@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # M4's training runs, then the evaluation (decision 40 in docs/PLAN.md). A run that already
 # finished (runs/m4/<run>/best.pt) is skipped, so the script can be started again after a stop.
-# About five hours of training on the M2 MacBook by scripts/bench_m4.py's timings.
+# About six hours on the M2 MacBook: the benchmark's timings, plus validation and LayoutLMv3 in parts.
 #   caffeinate bash scripts/run_m4.sh          (caffeinate keeps the Mac awake until it ends)
 # Run it with the environment active (source .venv/bin/activate), after scripts/prepare_m4.py.
 set -euo pipefail

@@ -88,3 +88,23 @@ def test_each_model_trains_and_tags_every_word(kind):
     tags = kie.predict(model, kind, rs, ex, labels, "cpu", size=2)
     assert set(tags) == {r.id for r in rs} and all(len(tags[r.id]) == len(r.words) for r in rs)
     assert history[-1]["val_f1"] > 0.5                                       # it learns the toy receipts
+
+
+def test_a_batch_in_parts_takes_the_same_step_as_the_whole_batch():
+    import torch
+    tok = tiny_tokenizer()
+    rs = [receipt(str(i)) for i in range(4)]
+    labels = label_list(rs)
+    ex = [e for r in rs for e in kie.encode(tok, r, {t: i for i, t in enumerate(labels)})]
+    after = []
+    for micro in (4, 1):
+        torch.manual_seed(0)
+        model = kie.build("lilt", labels, config=kie.tiny_config("lilt", len(tok)))
+        model.config.hidden_dropout_prob = model.config.attention_probs_dropout_prob = 0.0
+        for m in model.modules():
+            if isinstance(m, torch.nn.Dropout):
+                m.p = 0.0
+        kie.train(model, "lilt", ex, (rs, ex), labels, "cpu", steps=1, batch_size=4, lr=1e-3, eval_every=1,
+                  log=lambda row: None, micro=micro)
+        after.append(torch.cat([p.detach().flatten() for p in model.parameters()]))
+    assert torch.allclose(after[0], after[1], atol=1e-5)

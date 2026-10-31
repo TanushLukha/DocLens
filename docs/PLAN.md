@@ -594,6 +594,9 @@ seeds; the papers' boxes only as a check.**
 What: receipts are cut into windows of whole words of at most 384 tokens and padded to 128, 256
 or 384 tokens, so the Apple GPU sees three shapes (decision 21); batches of 8 windows of one length,
 the windows left over at a length carried up to the next, so every window trains once an epoch.
+LayoutLMv3 takes each batch in two parts of 4 whose gradients add up before the step, weighted by
+their labelled tokens, so the step is the one the whole batch would take; it validates in parts of
+4 too, and the GPU's cache is emptied after every validation.
 AdamW at a learning rate of 0.00005, a linear warmup over the first 10% of 2,000 steps (20 epochs)
 and a linear decay to zero; every 100 steps the model tags the validation receipts and the weights
 with the best field F1 are kept; three seeds per model (scripts/run_m4.sh). Every word gets its
@@ -601,7 +604,10 @@ own box. Once per layout model, the papers' setting is run as a check: every wor
 field's box (segment boxes), on which LayoutLMv3 base reports 96.56 entity F1 and LiLT 96.07.
 Why: scripts/bench_m4.py found CORD's training receipts short (762 of the 800 fit 128 tokens, the
 longest 296), so 384 tokens hold every one, and the largest GPU pool it saw, 11.7 GB for LayoutLMv3
-at 512 tokens, is a reason to stop below 512. Hugging Face's example for LayoutLMv3 on CORD trains
+at 512 tokens, is a reason to stop below 512. Even so, LayoutLMv3's first run ran out of GPU memory
+after 100 steps with whole batches of 8: its image adds 197 positions to every window, and attention
+grows with the square of the length. Parts of 4 keep the batch of 8 the other models train with,
+at the cost of a little speed. Hugging Face's example for LayoutLMv3 on CORD trains
 at 0.00005, scores every 100 steps and keeps the best model by F1, for 1,000 steps; 2,000 give LiLT
 and RoBERTa room, and the best validation step is kept anyway. The benchmark measured 0.38, 0.46
 and 1.09 s a step at 128 tokens for RoBERTa, LiLT and LayoutLMv3 (13, 16 and 37 minutes for 2,000

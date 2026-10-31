@@ -32,6 +32,9 @@ def parse():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument("--micro", type=int, default=None,
+                    help="parts a batch goes through the model in (default: 4 for LayoutLMv3, whose whole batches "
+                         "ran out of GPU memory on the Mac; the whole batch for the others)")
     ap.add_argument("--lr", type=float, default=5e-5)
     ap.add_argument("--warmup", type=float, default=0.1)
     ap.add_argument("--eval-every", type=int, default=100)
@@ -48,6 +51,7 @@ def parse():
     ap.add_argument("--no-mlflow", action="store_true")
     a = ap.parse_args()
     a.run = a.run or (f"{a.model}_{a.boxes}_{a.train_on}_s{a.seed}" + ("_tiny" if a.tiny else ""))
+    a.micro = a.micro or (4 if a.model == "layoutlmv3" and a.batch % 4 == 0 else a.batch)
     return a
 
 
@@ -73,8 +77,9 @@ class Tracker:
         self.ml = mlflow
 
     def log(self, row: dict) -> None:
+        gpu = f", GPU {row['gpu_gb']} GB" if "gpu_gb" in row else ""
         print(f"   step {row['step']:5d}  loss {row['loss']:.4f}  validation field F1 {100 * row['val_f1']:.2f}"
-              f"  ({row['seconds'] / 60:.1f} min)", flush=True)
+              f"  ({row['seconds'] / 60:.1f} min{gpu})", flush=True)
         if self.ml:
             self.ml.log_metrics({k: float(v) for k, v in row.items() if k != "step"}, step=row["step"])
 
@@ -117,13 +122,14 @@ def main():
 
     tex, vex = windows(train), windows(val)
     print(f"{args.run}: {len(train)} training receipts ({len(tex)} windows), {len(val)} validation receipts;"
-          f" {len(labels)} labels; {args.steps} steps of {args.batch} = {kie.epochs(tex, args.batch, args.steps):.1f} epochs;"
+          f" {len(labels)} labels; {args.steps} steps of {args.batch} (in parts of {args.micro})"
+          f" = {kie.epochs(tex, args.batch, args.steps):.1f} epochs;"
           f" {device}; loaded in {time.time() - t0:.0f} s", flush=True)
     params = {**vars(args), "labels": len(labels), "train_windows": len(tex), "device": str(device),
               "torch": torch.__version__, "checkpoint": kie.MODELS[kind] if not args.tiny else "tiny"}
     tracker = Tracker(args, params)
     state, history = kie.train(model, kind, tex, (val, vex), labels, device, args.steps, args.batch, args.lr, args.warmup,
-                               args.eval_every, args.seed, tracker.log)
+                               args.eval_every, args.seed, tracker.log, args.micro)
     best = max(history, key=lambda h: h["val_f1"])
     torch.save({"model": state, "labels": labels, "args": vars(args), "kind": kind, "best": best,
                 "tokenizer": None if args.tiny else kie.TOKENIZER}, out / "best.pt")
