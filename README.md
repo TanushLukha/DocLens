@@ -17,7 +17,7 @@ consonant, so a word cannot be cut into separate characters the way an English w
 | ✅ done | **M1 Baseline** | test sets (real Hindi words, real receipt words and lines, synthetic lines under eight kinds of damage); CER and WER; Tesseract measured three ways; OpenCV image cleaning compared |
 | ✅ done | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words and receipts; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw, with intervals and paired tests against Tesseract |
 | ✅ done | **M3 Pages** | finding lines on whole pages (a classical finder against docTR's detector and Tesseract), reading order, whole page accuracy, on synthetic Hindi and English pages and real receipts |
-| in progress | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
+| ✅ done | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
 | planned | **M5 Comparison** | DocLens against PaddleOCR, Surya, EasyOCR and a small vision language model: accuracy, speed, memory, licence |
 | planned | **M6 Ship** | FastAPI service, Docker image, ONNX export, a demo that runs in the browser |
 
@@ -29,6 +29,10 @@ words against 6.5%, 2.7% on receipt lines against 42.8% (results below).
 the CRNN reads the true lines at 0.1% to 1.9% CER; with DocLens's classical line finder it reads
 synthetic pages at 0.4% and 1.6% (Tesseract 11.4% and 9.7%), and with docTR's detector real
 receipts at 5.6% (Tesseract 51.8%).
+
+**M4 in one line:** on CORD's receipts, boxes and the image add nothing measurable to a text model
+reading the words in order (93.4% to 93.9% field F1 on true words); what loses fields is the OCR:
+from its words the extractors get 78.9% to 80.5%, and perfect tagging could get only 85.2%.
 
 The plan, the data and every design decision (what, why, and why not the alternatives) are in
 [docs/PLAN.md](docs/PLAN.md).
@@ -126,7 +130,8 @@ caffeinate bash scripts/run_m4.sh                   # every training run, then t
 
 `scripts/run_m4.sh` trains the three models with three seeds each, the papers' box setting once as a
 check, and LiLT on OCR words, then scores every run on the test receipts
-(`docs/results/m4_fields.md`). A finished run is skipped when the script starts again.
+(`docs/results/m4_fields.md`), and counts the fields the OCR loses (`docs/results/m4_ocr_losses.md`).
+A finished run is skipped when the script starts again.
 
 ## Results (M1, the Tesseract baseline)
 
@@ -316,6 +321,54 @@ Synthetic pages in the training fonts, by damage and by layout:
   0.33 to 0.34 s for docTR (on the GPU); reading them with the CRNN 0.8 to 1.1 s on the GPU. Tesseract
   takes 11 to 12 s per page on one core.
 
+## Results (M4, fields on receipts)
+
+Three extractors tag the words of CORD's 100 test receipts with their fields: RoBERTa base (the
+words alone), LiLT (the words and their boxes) and LayoutLMv3 (words, boxes and the image). Each was
+trained three times (seeds) on the 800 training receipts, the step with the best validation score
+kept. Of the test receipts' 1,309 fields (an item's name, count and price, the subtotal, the tax,
+the total, the cash, the change...), one counts only when its category and its text are both
+exactly right. Field F1 with a bootstrap 95% interval over receipts, the three seeds pooled per
+receipt. Every table is in [docs/results/m4_fields.md](docs/results/m4_fields.md).
+
+| Input | RoBERTa (words) | LiLT (words, boxes) | LayoutLMv3 (words, boxes, image) | Perfect tags |
+|---|---:|---:|---:|---:|
+| True words | 93.4% (91.1 to 95.7) | **93.9%** (92.0 to 95.9) | 93.7% (91.4 to 95.9) | 99.7% |
+| OCR words | 78.9% (74.3 to 83.1) | 79.8% (75.3 to 83.8) | **80.2%** (76.0 to 84.1) | 85.2% |
+
+The OCR words are M3's best reader of receipts: docTR's detector finds the words, M2's CRNN reads
+them. Perfect tags are the best any tagger could do with these words (on true words 99.7%, not 100:
+CORD sometimes makes a ":" a field of its own inside another field of the same category).
+
+* **On true words, layout adds nothing measurable.** LiLT is 0.5 points above RoBERTa (0.5 below to
+  1.5 above, p 0.33) and LayoutLMv3 0.2 below LiLT (p 0.67); every run of every model lands between
+  93.1% and 94.4%. Read in order, the words already say what the boxes say.
+* **Yet the layout models lean on their boxes.** Given one box for every word, LayoutLMv3 falls from
+  93.7% to 58.2% and LiLT to 85.0%. Given a blank image, LayoutLMv3 is unchanged (93.9%, p 0.26).
+  They learn to use the boxes, and the image is not used at all.
+* **On OCR words, boxes help a little.** LiLT is 0.9 points above RoBERTa (0.2 to 1.6, p 0.01) and
+  LayoutLMv3 1.3 (0.5 to 2.2, p 0.003): when words are misread, where they sit still helps.
+* **The OCR, not the extractor, costs the most.** Every model trained on true words loses 13.5 to
+  14.5 points from true to OCR words, and perfect tags on the OCR words reach only 85.2%: 208 of
+  the 1,309 fields (15.9%) are lost before any model tags a word. Of those, 116 are one character
+  off (70 of them in a digit or a separator: "100,000" read as "100.000", a change of "25,400" as
+  "28,400"), 44 two or three characters, 39 more or joined with a neighbour, and 9 have no field
+  of their category left ([docs/results/m4_ocr_losses.md](docs/results/m4_ocr_losses.md)).
+* **Training on OCR words does not close the gap.** LiLT trained on the OCR words of the training
+  receipts gets 80.5% on OCR words against 79.8% (+0.7, p 0.13), and 93.2% against 93.9% on true
+  words.
+* **The papers' boxes, as a check.** Given each field's own box, which only the truth knows, LiLT
+  gets 96.4% (one seed), in line with the 96.07 its paper reports, and LayoutLMv3 94.5% (its paper:
+  96.56). So the training code reproduces LiLT's published level, and part of the published numbers
+  comes from boxes that tell where each field starts and ends.
+* **Which fields fail.** Item names 90.4% to 92.3%; prices, counts and subtotals 97.1% to 99.2%;
+  rare fields worst, such as an item's discount (10 in the test) at 54% to 58% with word boxes.
+* **Validation flatters.** Each run's best validation F1 is 1.2 to 2.5 points above its test F1:
+  the step is picked on the validation receipts.
+* **Cost.** On the M2 MacBook's GPU a run of 2,000 steps took 15 minutes for RoBERTa, 18 to 21
+  for LiLT and 44 for LayoutLMv3, which takes each batch in two halves because whole batches ran
+  out of GPU memory (decision 40). All 14 runs took about six hours.
+
 ## Layout
 
 ```
@@ -346,7 +399,8 @@ src/doclens/
   kie.py          the three field extractors: windows, batches, training, tagging
 scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh,
                   prepare_m2, bench_m2, train_crnn, eval_crnn, compare_runs, run_m2.sh,
-                  make_pages, eval_pages, prepare_m4, bench_m4, train_kie, eval_kie, run_m4.sh
+                  make_pages, eval_pages, prepare_m4, bench_m4, train_kie, eval_kie, ocr_losses,
+                  run_m4.sh
 tests/            unit tests for all of the above
 .github/          CI: lint, type checks and tests on every push
 fonts/            35 font files with their licences (fonts/README.md)

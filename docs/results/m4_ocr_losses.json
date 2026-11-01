@@ -1,0 +1,89 @@
+{
+ "receipts": 100,
+ "fields": 1309,
+ "lost": 208,
+ "kinds": {
+  "one character wrong": 116,
+  "two or three characters wrong": 44,
+  "more characters wrong, or joined or split": 39,
+  "no field of its category found": 9
+ },
+ "one_character_a_digit_or_separator": 70,
+ "numbers": 552,
+ "numbers_lost": 64,
+ "by_category": {
+  "menu.nm": 37,
+  "menu.cnt": 24,
+  "total.total_price": 23,
+  "menu.price": 23,
+  "total.changeprice": 16,
+  "total.cashprice": 12,
+  "menu.sub.price": 11,
+  "menu.sub.nm": 8,
+  "sub_total.subtotal_price": 8,
+  "sub_total.tax_price": 8,
+  "total.menuqty_cnt": 6,
+  "sub_total.etc": 6,
+  "total.creditcardprice": 4,
+  "menu.unitprice": 4,
+  "menu.num": 4,
+  "menu.discountprice": 4,
+  "menu.itemsubtotal": 3,
+  "sub_total.discount_price": 3,
+  "total.menutype_cnt": 2,
+  "total.total_etc": 1,
+  "sub_total.service_price": 1
+ },
+ "examples": [
+  {
+   "category": "menu.itemsubtotal",
+   "true": "60.000",
+   "read": "80.000"
+  },
+  {
+   "category": "total.creditcardprice",
+   "true": "EDCCIMBNIAGANo:xx773060.000",
+   "read": "EDCCIMBNIAGANo:xX773060.000"
+  },
+  {
+   "category": "sub_total.subtotal_price",
+   "true": "SUBTOTAL28,000",
+   "read": "SUBTOTA28,000"
+  },
+  {
+   "category": "total.menuqty_cnt",
+   "true": "TOTALITEMS1",
+   "read": "TOTALITEMS"
+  },
+  {
+   "category": "menu.cnt",
+   "true": "2",
+   "read": "1"
+  },
+  {
+   "category": "total.changeprice",
+   "true": "CHANGE25,400",
+   "read": "CHANGE28,400"
+  },
+  {
+   "category": "menu.nm",
+   "true": "REDBEANBREAD",
+   "read": "REDBEANBIEAD"
+  },
+  {
+   "category": "total.changeprice",
+   "true": "CHANGE4,000",
+   "read": "CHANCE4,000"
+  },
+  {
+   "category": "menu.price",
+   "true": "100,000",
+   "read": "100.000"
+  },
+  {
+   "category": "total.cashprice",
+   "true": "CashRp.111,000",
+   "read": "CashRp.101,000"
+  }
+ ]
+}

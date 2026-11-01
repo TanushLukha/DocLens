@@ -34,7 +34,7 @@ licence, and where does each one fail?
 | M2 Recognizer | Can a small CRNN trained from scratch beat Tesseract, also on fonts it never saw? | synthetic training lines drawn on the fly, CRNN with CTC, greedy and beam decoding, TinyGPT rescoring | the M1 sets, same metrics |
 | M3 Pages | How well are lines and blocks found, and does reading order hold on whole pages? | classical line finding (projections, connected components, XY cut) against docTR's pretrained detector and Tesseract's page analysis; reading order | synthetic pages and CORD receipts: page CER, line precision and recall, reading order |
 | M4 Fields | What does layout add to extracting fields? | LayoutLMv3 and LiLT against a text only model; true text against OCR text; explanations | CORD field F1 |
-| M5 Comparison | Where does DocLens stand against modern OCR? | one harness for PaddleOCR, Surya, EasyOCR, a small VLM and DocLens | the M1 sets: accuracy, images per second, memory, licence |
+| M5 Comparison | Where does DocLens stand against modern OCR? | one harness for PaddleOCR, Surya, EasyOCR, a small VLM and DocLens | the M1 sets and CORD's receipts: CER, field F1 through the same extractor, images per second, memory, licence |
 | M6 Ship | Can someone use it? | FastAPI service, Docker image, ONNX export, browser demo | latency and throughput, an end to end test |
 
 ## Data
@@ -640,6 +640,38 @@ and LayoutLMv3 with a blank image; field F1 per category; each run's validation 
 Why: removing an input at test time shows how much a trained model leans on it, without training
 another model; per category F1 shows which fields layout helps (a price beside its item, a total
 at the bottom).
+
+## What M4 found, and what it means for M5
+
+The full tables are in `docs/results/m4_fields.md` and `docs/results/m4_ocr_losses.md`, the
+headline numbers and findings in the README.
+
+* **Ship LiLT, on words in reading order.** On true words the three models are within half a point
+  (RoBERTa 93.4%, LiLT 93.9%, LayoutLMv3 93.7% field F1; no difference measurable), and on OCR
+  words LiLT is 0.9 points above RoBERTa (p 0.01) and not measurably below LayoutLMv3 (p 0.22).
+  LiLT is MIT, trains in 18 to 21 minutes where LayoutLMv3 takes 44, and does not need the image,
+  which LayoutLMv3 does not use anyway (a blank image changes nothing, p 0.26).
+* **The OCR is where fields are lost, so M5 compares OCR systems by the fields they give.** From
+  true to OCR words every model loses 13.5 to 14.5 points, and perfect tags on the OCR words reach
+  only 85.2%: 208 of the 1,309 test fields are lost before any tagging. M5 runs each OCR system it
+  compares through the same LiLT and reports field F1 next to page CER, because a page CER says
+  little about whether the total is right.
+* **Most lost fields are one character off.** 116 of the 208 differ from the truth by a single
+  character, 70 of them in a digit or a separator. Receipts check themselves (item prices add up
+  to the subtotal, the subtotal and tax to the total, cash minus total to the change), so a check
+  of the arithmetic could find, and sometimes fix, a misread number; measured when the service is
+  built (M6).
+* **The order of the words carries the layout.** A text model reading CORD's words in reading order
+  does as well as the layout models, which still lean on their boxes when they have them (one box
+  for every word costs LayoutLMv3 35.5 points, LiLT 9.0). The order rule found in M3 is what the
+  service must keep; on documents whose order is harder to find than a receipt's, boxes may matter
+  more, which CORD cannot show.
+* **Published numbers lean on the truth's boxes.** With every word given its field's box, LiLT
+  gets 96.4% (its paper 96.07) against 93.9% with word boxes; DocLens reports word boxes, the ones
+  an OCR can give.
+* **Training on OCR words is not worth its cost here** (+0.7 points on OCR words, p 0.13, and 0.7
+  fewer on true words), and validation scores flatter by 1.2 to 2.5 points, so test sets are scored
+  once, after every choice is made.
 
 ## Decisions ahead
 

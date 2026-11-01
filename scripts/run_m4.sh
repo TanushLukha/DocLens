@@ -28,4 +28,5 @@ for seed in 0 1 2; do                                   # LiLT trained on OCR wo
   run "lilt_word_ocr_s$seed" --model lilt --train-on ocr --seed "$seed"
 done
 python scripts/eval_kie.py
-echo "M4 runs done: docs/results/m4_fields.md"
+python scripts/ocr_losses.py
+echo "M4 runs done: docs/results/m4_fields.md and m4_ocr_losses.md"
