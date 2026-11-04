@@ -1,0 +1,228 @@
+{
+ "receipts": 100,
+ "rules_on_true_fields": {
+  "items add up to the subtotal": {
+   "applies": 64,
+   "holds": 61
+  },
+  "subtotal and its extras give the total": {
+   "applies": 63,
+   "holds": 57
+  },
+  "items add up to the total": {
+   "applies": 31,
+   "holds": 30
+  },
+  "cash less the total is the change": {
+   "applies": 50,
+   "holds": 47
+  }
+ },
+ "perfect_tags": {
+  "flagged": 22,
+  "flagged_with_a_wrong_amount": 17,
+  "with_a_wrong_amount": 53,
+  "of_those_flagged": 17,
+  "fixes": 6,
+  "fixes_right": 2,
+  "examples": [
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.total_price",
+    "from": "GRAND TOTAL 51,3000",
+    "to": "GRAND TOTAL 51,300",
+    "right": false,
+    "receipt": "13"
+   },
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.cashprice",
+    "from": "CASH 200,000",
+    "to": "CASH 300,000",
+    "right": false,
+    "receipt": "14"
+   },
+   {
+    "rule": "items add up to the subtotal",
+    "field": "menu.price",
+    "from": "165,400",
+    "to": "165,460",
+    "right": true,
+    "receipt": "51"
+   },
+   {
+    "rule": "items add up to the subtotal",
+    "field": "menu.price",
+    "from": "1108,000",
+    "to": "108,000",
+    "right": true,
+    "receipt": "70"
+   },
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.changeprice",
+    "from": "Kembalian 22000",
+    "to": "Kembalian 2200",
+    "right": false,
+    "receipt": "71"
+   },
+   {
+    "rule": "subtotal and its extras give the total",
+    "field": "sub_total.tax_price",
+    "from": "Pb1 2,681",
+    "to": "Pb1 2,682",
+    "right": false,
+    "receipt": "90"
+   }
+  ],
+  "f1_before": {
+   "f1": 0.851508120649652,
+   "lo": 0.813684001916034,
+   "hi": 0.885441849385856,
+   "n": 100
+  },
+  "f1_after": {
+   "f1": 0.8507347254447022,
+   "lo": 0.8132128580470285,
+   "hi": 0.8847547982981053,
+   "n": 100
+  },
+  "after_vs_before": {
+   "diff": -0.0007733952049497894,
+   "lo": -0.004130567247329656,
+   "hi": 0.0023933226391482706,
+   "p": 0.788,
+   "n": 100
+  }
+ },
+ "lilt": {
+  "flagged": 73,
+  "flagged_with_a_wrong_amount": 62,
+  "with_a_wrong_amount": 182,
+  "of_those_flagged": 62,
+  "fixes": 19,
+  "fixes_right": 6,
+  "examples": [
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.total_price",
+    "from": "GRAND TOTAL 51,3000",
+    "to": "GRAND TOTAL 51,300",
+    "right": false,
+    "receipt": "13"
+   },
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.cashprice",
+    "from": "CASH 200,000",
+    "to": "CASH 300,000",
+    "right": false,
+    "receipt": "14"
+   },
+   {
+    "rule": "items add up to the subtotal",
+    "field": "menu.price",
+    "from": "165,400",
+    "to": "165,460",
+    "right": true,
+    "receipt": "51"
+   },
+   {
+    "rule": "items add up to the subtotal",
+    "field": "menu.price",
+    "from": "1108,000",
+    "to": "108,000",
+    "right": true,
+    "receipt": "70"
+   },
+   {
+    "rule": "subtotal and its extras give the total",
+    "field": "sub_total.tax_price",
+    "from": "Pb1 2,681",
+    "to": "Pb1 2,682",
+    "right": false,
+    "receipt": "90"
+   },
+   {
+    "rule": "items add up to the total",
+    "field": "menu.price",
+    "from": "120,000",
+    "to": "120,100",
+    "right": false,
+    "receipt": "12"
+   },
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.total_price",
+    "from": "GRAND TOTAL 51,3000",
+    "to": "GRAND TOTAL 51,300",
+    "right": false,
+    "receipt": "13"
+   },
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.cashprice",
+    "from": "CASH 200,000",
+    "to": "CASH 300,000",
+    "right": false,
+    "receipt": "14"
+   },
+   {
+    "rule": "items add up to the subtotal",
+    "field": "menu.price",
+    "from": "165,400",
+    "to": "165,460",
+    "right": true,
+    "receipt": "51"
+   },
+   {
+    "rule": "items add up to the subtotal",
+    "field": "menu.price",
+    "from": "1108,000",
+    "to": "108,000",
+    "right": true,
+    "receipt": "70"
+   },
+   {
+    "rule": "cash less the total is the change",
+    "field": "total.changeprice",
+    "from": "Kembalian 22000",
+    "to": "Kembalian 2200",
+    "right": false,
+    "receipt": "71"
+   },
+   {
+    "rule": "subtotal and its extras give the total",
+    "field": "sub_total.tax_price",
+    "from": "Pb1 2,681",
+    "to": "Pb1 2,682",
+    "right": false,
+    "receipt": "90"
+   }
+  ],
+  "f1_before": {
+   "f1": 0.7977642276422764,
+   "lo": 0.7538272460399846,
+   "hi": 0.8373119343727752,
+   "n": 100
+  },
+  "f1_after": {
+   "f1": 0.7972560975609756,
+   "lo": 0.7534780173607599,
+   "hi": 0.8354654959435521,
+   "n": 100
+  },
+  "after_vs_before": {
+   "diff": -0.000508130081300795,
+   "lo": -0.003618396187023193,
+   "hi": 0.0025030234625238374,
+   "p": 0.81,
+   "n": 100
+  },
+  "runs": [
+   "lilt_word_true_s0",
+   "lilt_word_true_s1",
+   "lilt_word_true_s2"
+  ]
+ }
+}

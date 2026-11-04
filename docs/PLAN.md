@@ -834,17 +834,105 @@ the headline numbers and findings in the README.
   DocLens's ONNX graph against the PyTorch model before it ships and measures the service end to
   end over HTTP.
 
-## Decisions ahead
+## Decisions in M6
 
-Recorded here when each milestone is built. Already known:
+**49. One service, two kinds of document, and the caller says which.**
+What: a FastAPI service (doclens/service.py) over one pipeline (doclens/pipeline.py). POST /page
+takes a printed page and returns its lines in reading order, each with its text and its four
+corners: M3's classical finder, then the CRNN. POST /receipt takes a receipt and returns its words
+in reading order (docTR's detector, its rows top to bottom), the CRNN's reading of each, the fields
+LiLT tags (M4) and whether each of the receipt's sums holds. GET /health names the models, GET /
+serves the demo page. Images come as a file in a form, in any format OpenCV reads, and are read in
+grey; empty files, files that are not images, images under 16 pixels a side, over 25 MB or over 60
+million pixels are refused with a message. One image is read at a time.
+Why the caller says the kind: pages and receipts need different finders and orders (M3: docTR's
+order reads a receipt at 47.1% page CER, top to bottom at 5.6%; the classical finder reads pages at
+0.4% to 1.6%, receipts at 44.2%), and a wrong guess costs a whole document while asking costs the
+caller one word. Why not guess the kind: a classifier would need its own labelled data and test,
+and its mistakes would reach the caller as unexplained bad text. Why grey: every number in M1 to M5
+was measured on grey images. Why one image at a time: ONNX Runtime and PyTorch already spread a step
+over the cores, so parallel requests would only compete; the benchmark found 0.76 receipts a second
+from one client and 0.73 from four.
+Why FastAPI: typed parameters, multipart uploads and an OpenAPI page for free; why not Flask: none
+of those without extensions.
 
-* **M6 serves on CPUs.** The service reads pages with the classical finder and receipts with
-  docTR's detector, so it must be told which kind of document it has (M3's findings); the
-  arithmetic of receipts is checked there (M4's findings).
+**50. The CRNN in ONNX Runtime on the CPU; docTR's detector and LiLT in PyTorch on the CPU.**
+What: scripts/export_models.py exports the CRNN with PyTorch's current exporter (torch.export, then
+onnxscript), the batch and the width left free, and checks the graph against the PyTorch model on
+every eighth M5 crop before keeping it: all 474 crops read the same, log probabilities within 0.0005. LiLT is the seed of M4's three with the best
+validation field F1 (seed 1, 96.2% on the validation receipts), saved with its labels and RoBERTa's tokenizer, so the service
+downloads nothing.
+Why ONNX for the CRNN: it reads every line, so it is the step that runs most; ONNX Runtime ran it
+in 3.3 s against PyTorch's 3.6 s for those 474 crops on the Mac's CPU (1.8 times faster on an x86
+Linux CPU), with the same text, and the graph runs wherever ONNX Runtime does. Why the CPU: a service runs on servers without
+Apple's GPU, and M2 to M5 measured the GPU already. Why not int8 weights: ONNX Runtime's int8 copy was smaller (11.6 MB against 15.8), faster on the Mac (2.3 s against 3.3 s) and as accurate (1.56% CER against 1.57%), but on an x86 Linux CPU it ran 5.7 times slower than float32; how fast it is depends on the server's CPU, so the float32 graph ships and int8 stays a measured option. Why not docTR
+and LiLT in ONNX too: they run once a receipt where the CRNN runs once a line; exporting them would
+let the image drop PyTorch, left for later. Why the older exporter was dropped: PyTorch marks its
+options deprecated; the current one needs onnxscript, and in PyTorch 2.14 a second export in one
+process fixed the width, so export_models.py exports once per process and the export refuses a
+graph whose batch or width is fixed.
+
+**51. A receipt's sums are checked and reported, never used to change a field.**
+What: doclens/checks.py reads each amount as written (thousands separators and cents, "60.000" and
+"60,000.00" alike) and checks three rules on the fields found: the items, their add ons and
+discounts add up to the subtotal (or the total when there is none); the subtotal with service,
+discounts and tax gives the total (tax added, or already inside); cash less the total is the
+change. The service reports each rule that applies and whether it holds. scripts/eval_checks.py
+measures them on CORD's 100 test receipts: on the true fields the rules hold on 61 of 64, 57 of 63, 30 of 31 and 47 of 50 receipts (rounding and printing differ); on LiLT's fields from the OCR words (three seeds), a failing rule flags 73 receipts, 62 of them (85%) with an amount misread or lost, but catches only 62 of the 182 such receipts (34%).
+Why: M4 found most fields the OCR loses one character off, often a digit, and receipts state their
+own sums. Why report and not fix: a one character fix that makes a failing sum hold is found
+19 times on LiLT's fields and right 6 times, and field F1 goes from 79.8% to 79.7% (p 0.81); with perfect tags, 6 fixes and 2 right. A failing sum says that an amount is wrong, not which. Why not more rules (quantity times unit price): CORD marks unit prices on too few items
+to test them.
+
+**52. One Docker image for the CPU with everything inside, built and checked by CI.**
+What: Python 3.13 slim, PyTorch's CPU build, the package with its service extras, docTR's detector
+weights fetched while the image is built, models/ copied in, a user without root, a health check;
+no network needed when it runs. CI builds the image with tiny untrained models
+(scripts/tiny_models.py) and runs scripts/check_service.py against it over HTTP.
+Why everything inside: the image reads documents offline with exactly the models measured, and
+cannot be started with the wrong ones. Why tiny models in CI: the real ones come from training runs
+on the Mac that are not in the repository; CI checks the image's plumbing, the Mac its accuracy.
+Why not mount the models at run time: possible (docker run with a volume), but then the image and
+its models can drift apart. Why the CPU build of PyTorch: the CUDA build is several times larger
+and the service uses no GPU.
+
+**53. The service measured end to end over HTTP, on the Mac's CPU.**
+What: scripts/bench_m6.py starts the service, runs the end to end checks, then sends it the 150
+synthetic pages and 100 receipts M5 compared every system on, one at a time, then the receipts from
+1, 2 and 4 clients at once; it scores what came back as M5 scored DocLens and records the service's
+peak memory: a page waits 1.42 s at the median (finding 0.15 s, reading 1.20 s) and 1.95 s at the 95th percentile, a receipt 1.23 s and 1.46 s; the service reads the pages at 1.6% page CER and the receipts at 6.0% with 79.6% field F1, as M5 measured DocLens on the GPU (1.6%, 6.0%, 79.7% over three seeds); 0.76 receipts a second from one client and 0.73 from four; 3.3 GB at its peak, with a models folder of 516 MB.
+Why: what a user waits for includes HTTP and decoding the image, and scoring the service's answers
+checks that the shipped path (ONNX, the CPU) reads as the measured one did.
+
+**54. A demo page in plain HTML, served by the service.**
+What: one page (doclens/demo.html) at /: choose or drop an image, say whether it is a page or a
+receipt, and see the lines or words drawn over the image, the text in reading order (a line and its
+box light up together), and for a receipt its fields and its sums.
+Why plain HTML: it ships inside the package and the image, needs no build step and no network.
+Why not run the models in the browser (ONNX Runtime Web): the CRNN could, but the line finder and
+docTR are Python, so the page would read single lines only.
+
+## What M6 found
+
+The tables are in `docs/results/m6_service.md` and `docs/results/m6_checks.md`.
+
+* **The shipped path reads as the measured one did.** Through HTTP, ONNX Runtime and the CPU the
+  service reads the synthetic pages at 1.6% page CER and the receipts at 6.0%, with 79.6% field F1,
+  the numbers M5 measured for DocLens on the GPU.
+* **A page in under 1.5 s and a receipt in about 1.2 s on a laptop CPU,** in 3.3 GB. Reading the
+  lines is most of a page's time (1.20 of 1.42 s), finding the words most of a receipt's (0.77 s);
+  more clients do not add throughput, one image at a time already uses the cores.
+* **Sums flag, they do not fix.** A failing sum points at a receipt with a wrong amount 85% of the
+  time, but finds only a third of them, and changing a digit to make a sum hold is right a third of
+  the time; the service reports the sums and leaves the fields as read.
 
 ## What runs where
 
 Everything that produces a number runs on the M2 MacBook. M1 needs only the CPU (Tesseract uses
 every core); M2 trains on the Apple GPU through PyTorch's MPS backend, with data workers on the
-CPU cores. M3 runs Tesseract on every core, docTR's detector and the CRNN on the Apple GPU. GitHub
-Actions runs the tests on Linux after every push.
+CPU cores. M3 runs Tesseract on every core, docTR's detector and the CRNN on the Apple GPU. M4
+trains the extractors on the Apple GPU. M5 runs every system on the Mac in its own environment
+(PaddleOCR on the CPU, the others on the Apple GPU). M6 serves and measures on the Mac's CPU. Two
+numbers in decision 50 come from an x86 Linux CPU instead, to show that the int8 graph's speed
+depends on the processor. GitHub Actions runs the tests on Linux after every push, and builds the
+Docker image and checks it end to end.

@@ -68,6 +68,7 @@ def test_reading_meets_five_shapes_and_batching_changes_nothing():
     torch.manual_seed(0)
     model = CRNN(CRNNConfig(n_classes=10, height=32, **SMALL))
     rec = Recognizer(model, Alphabet(list("abcdefghi")))
+    rec.fill = True                                         # as on the Apple GPU: batches filled to one size
     shapes = set()
     model.register_forward_pre_hook(lambda _, args: shapes.add(tuple(args[0].shape)))
     rng = np.random.default_rng(0)
@@ -75,8 +76,11 @@ def test_reading_meets_five_shapes_and_batching_changes_nothing():
     together = dict(rec.logprobs(images, batch_size=4))
     assert shapes <= {(4, 1, 32, c) for c in crnn.width_classes(32)} and sorted(together) == list(range(7))
     alone = dict(rec.logprobs(images, batch_size=1))       # every image read by itself, with no blanks
+    rec.fill = False                                        # as on the CPU: batches as large as they come
+    unfilled = dict(rec.logprobs(images, batch_size=4))
     for i in range(7):
         assert together[i].shape == alone[i].shape and np.allclose(together[i], alone[i], atol=1e-4)
+        assert np.allclose(together[i], unfilled[i], atol=1e-4)
 
 
 def test_checkpoint_round_trip(tmp_path):

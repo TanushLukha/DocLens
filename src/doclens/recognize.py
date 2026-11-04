@@ -21,6 +21,7 @@ class Recognizer:
     def __init__(self, model: crnn.CRNN, alphabet, device: torch.device | str = "cpu"):
         self.model, self.alphabet, self.device = model.to(device).eval(), alphabet, torch.device(device)
         self.height, self.max_width = model.cfg.height, model.cfg.max_width
+        self.fill = self.device.type == "mps"      # fixed batch sizes only where the GPU keeps a graph per shape
 
     @classmethod
     def load(cls, path: str | Path, device: str = "auto") -> Recognizer:
@@ -46,12 +47,16 @@ class Recognizer:
 
     def _run(self, batch: list[tuple[int, np.ndarray]], width: int, batch_size: int):
         blank = np.ones((self.height, crnn.DOWNSAMPLE * 2), np.float32)
-        images = [x for _, x in batch] + [blank] * (batch_size - len(batch))
+        images = [x for _, x in batch] + [blank] * ((batch_size - len(batch)) if self.fill else 0)
         x, widths = crnn.collate(images, width)
-        logits, lengths = self.model(x.to(self.device), widths.to(self.device))
-        logp = F.log_softmax(logits.float(), dim=-1).cpu().numpy()
+        logp, lengths = self._net(x, widths)
         for j, (i, _) in enumerate(batch):
             yield i, logp[: int(lengths[j]), j]
+
+    def _net(self, x: torch.Tensor, widths: torch.Tensor) -> tuple[np.ndarray, np.ndarray]:
+        """Log probabilities (T x B x C) and columns per image, as numpy arrays."""
+        logits, lengths = self.model(x.to(self.device), widths.to(self.device))
+        return F.log_softmax(logits.float(), dim=-1).cpu().numpy(), lengths.cpu().numpy()
 
     def _each(self, images, decode: Callable[[np.ndarray], object], batch_size: int) -> list:
         out: list = [None] * len(images)

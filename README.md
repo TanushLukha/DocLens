@@ -19,7 +19,7 @@ consonant, so a word cannot be cut into separate characters the way an English w
 | ✅ done | **M3 Pages** | finding lines on whole pages (a classical finder against docTR's detector and Tesseract), reading order, whole page accuracy, on synthetic Hindi and English pages and real receipts |
 | ✅ done | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
 | ✅ done | **M5 Comparison** | DocLens against Tesseract, PaddleOCR, EasyOCR and two small vision language models (PaddleOCR VL, Surya 2) on the same images: accuracy, fields, speed, memory, licence |
-| planned | **M6 Ship** | FastAPI service, Docker image, ONNX export, a demo that runs in the browser |
+| ✅ done | **M6 Ship** | a web service (FastAPI) with a demo page, the recognizer as an ONNX graph, a Docker image built and checked by CI, the receipt's sums checked, all measured end to end |
 
 **M2 in one line:** a CRNN of 4.1 million parameters, trained from scratch on a laptop, reads
 every test set better than Tesseract without being told the language: 0.6% CER on printed Hindi
@@ -39,6 +39,10 @@ DocLens reads Hindi words and receipt lines best (0.5% and 2.8% CER), gets as ma
 right as any of them (78.9% field F1; none measurably more) and reads a page in 1.1 s; only Surya 2
 reads whole Hindi pages better (0.4% page CER against 1.6%), 31 times slower and under weights a
 company above $5 million of revenue may not use.
+
+**M6 in one line:** the service reads a page in 1.4 s and a receipt with its fields in 1.2 s on
+a laptop's CPU, in 3.3 GB, as accurately as DocLens measured on the GPU (1.6% and 6.0% page CER,
+79.6% field F1), and flags receipts whose sums fail rather than guess which digit is wrong.
 
 The plan, the data and every design decision (what, why, and why not the alternatives) are in
 [docs/PLAN.md](docs/PLAN.md).
@@ -156,6 +160,22 @@ caffeinate bash scripts/run_m5.sh           # every system on every image, then 
 runners in `scripts/m5/` write what each system read to `runs/m5/`, and `scripts/m5_score.py` scores
 them all the same way (`docs/results/m5_compare.md`). Images a system has read are skipped when
 the script starts again.
+
+## Run the service (M6)
+
+```bash
+pip install -e ".[service,export]"                  # FastAPI, ONNX Runtime, and PyTorch's ONNX exporter
+python scripts/export_models.py                     # models/: the CRNN as ONNX, LiLT for fields
+uvicorn doclens.service:app --port 8000             # then open http://127.0.0.1:8000
+python scripts/check_service.py                     # in a second terminal: an end to end check over HTTP
+python scripts/bench_m6.py                          # latency, throughput and accuracy: docs/results/m6_service.md
+python scripts/eval_checks.py                       # what a receipt's sums catch: docs/results/m6_checks.md
+```
+
+With Docker, after `export_models.py`: `docker build -t doclens .` and `docker run --rm -p 8000:8000 doclens`.
+The image holds the code, the models and docTR's weights, and needs no network. `POST /page` takes a
+printed page and gives its lines in reading order, each with its box; `POST /receipt` takes a receipt
+and gives its words, its fields and whether its sums hold; `GET /health` names the models.
 
 ## Results (M1, the Tesseract baseline)
 
@@ -473,6 +493,35 @@ its model, on a Mac with 16 GB; Tesseract's is one of its eight processes.
   to hold them. DocLens's models are small (the CRNN has 4.1 million parameters); its 4.9 GB is
   what PyTorch held on the Apple GPU while reading.
 
+## Results (M6, the service)
+
+The service (`uvicorn doclens.service:app`) on the M2 MacBook Air's CPU, measured over HTTP by
+`scripts/bench_m6.py` with the images M5 compared every system on. Tables in
+[docs/results/m6_service.md](docs/results/m6_service.md) and
+[docs/results/m6_checks.md](docs/results/m6_checks.md).
+
+| Kind | Images | Median wait | 95th percentile | Finding | Reading | Fields | Page CER | Field F1 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Synthetic page | 150 | 1.42 s | 1.95 s | 0.15 s | 1.20 s | | 1.6% | |
+| Receipt | 100 | 1.23 s | 1.46 s | 0.77 s | 0.10 s | 0.35 s | 6.0% | 79.6% (74.8 to 83.8) |
+
+* **It reads as DocLens did in M5.** The CRNN runs as an ONNX graph checked against PyTorch (all
+  474 test crops read the same), docTR and LiLT in PyTorch, all on the CPU; the pages come out at
+  1.6% and the receipts at 6.0% page CER, as on the GPU, with 79.6% field F1 from one LiLT seed
+  (the one best on validation).
+* **Speed and memory.** 0.76 receipts a second from one client and 0.73 from four: one image at a
+  time, each step already spread over the cores. 3.3 GB at the peak; the models folder is 516 MB.
+  The first receipt takes 5.6 s while docTR and LiLT load.
+* **The sums of a receipt.** On LiLT's fields a failing sum points at a receipt with a wrong or
+  lost amount 85% of the time (62 of 73), but finds only a third of them (62 of 182, three seeds),
+  and a one digit fix that makes the sum hold is right 6 times in 19 (field F1 79.8% before, 79.7%
+  after). So the service reports each sum and whether it holds, and changes nothing.
+* **Smaller weights are not always faster.** An int8 copy of the CRNN was 11.6 MB against 15.8 and
+  1.5 times faster on the Mac at the same CER, but 5.7 times slower on an x86 Linux CPU, so the
+  float32 graph ships (decision 50).
+* **The Docker image** carries the code, the models and docTR's weights and needs no network; CI
+  builds it with tiny models on every push and checks it end to end over HTTP.
+
 ## Layout
 
 ```
@@ -501,17 +550,25 @@ src/doclens/
   pagescore.py    page CER, line matching, splits and merges, reading order
   fields.py       receipts as tagged words (CORD's fields), OCR words, field F1
   kie.py          the three field extractors: windows, batches, training, tagging
+  checks.py       a receipt's sums: the rules, amounts as written, one character fixes
+  onnx_crnn.py    the CRNN as an ONNX graph, read with ONNX Runtime
+  pipeline.py     DocLens end to end: a page or a receipt in, lines, words, fields and checks out
+  service.py      the web service (FastAPI): /page, /receipt, /health and the demo page
+  demo.html       the demo page: choose an image, see what was found drawn over it
 scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh,
                   prepare_m2, bench_m2, train_crnn, eval_crnn, compare_runs, run_m2.sh,
                   make_pages, eval_pages, prepare_m4, bench_m4, train_kie, eval_kie, ocr_losses,
-                  run_m4.sh, m5_export, m5_score, m5_diagnose, setup_m5.sh, run_m5.sh
+                  run_m4.sh, m5_export, m5_score, m5_diagnose, setup_m5.sh, run_m5.sh,
+                  eval_checks, export_models, tiny_models, check_service, bench_m6
 scripts/m5/       one runner per OCR system for M5, each run in that system's own environment,
                   and probe.py, the checks behind decision 48
 tests/            unit tests for all of the above
-.github/          CI: lint, type checks and tests on every push
+Dockerfile        the service's image for the CPU, models inside
+.github/          CI: lint, type checks and tests on every push, then the image built and checked
 fonts/            35 font files with their licences (fonts/README.md)
 docs/             PLAN.md and results/
-data/, runs/      downloads and outputs, never committed
+data/, runs/,     downloads, outputs and exported models, never committed
+models/
 ```
 
 ## Data and licences

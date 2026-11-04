@@ -20,11 +20,17 @@ track = ["mlflow>=3.17"]
 lm = ["safetensors>=0.4"]
 pages = ["python-doctr==1.1.0"]
 fields = ["transformers==5.22.1"]
-dev = ["pytest>=7", "rapidfuzz>=3.0", "ruff>=0.15", "mypy>=1.11"]
+service = ["fastapi==0.162.0", "uvicorn==0.54.0", "python-multipart==0.0.33", "onnxruntime==1.31.1",
+           "python-doctr==1.1.0", "transformers==5.22.1"]
+export = ["onnx==1.23.2", "onnxscript==0.7.2"]
+dev = ["pytest>=7", "rapidfuzz>=3.0", "ruff>=0.15", "mypy>=1.11", "httpx>=0.28"]
 plot = ["matplotlib>=3.7"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+doclens = ["demo.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
