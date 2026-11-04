@@ -68,3 +68,20 @@ class DoctrLines:
             return []
         return [self._quad(word.geometry, w, h) for block in docs["rows"].pages[0].blocks
                 for line in block.lines for word in line.words]
+
+
+def rows_order(quads: list[np.ndarray], size: tuple[int, int]) -> list[int]:
+    """Indices of word boxes in the order docTR gives its own detections by default: grouped into
+    lines, the lines top to bottom, the words of a line left to right. M5 puts every system's words
+    in this order, the one DocLens reads receipts in (M4). size is the page's (width, height)."""
+    from doctr.models.builder import DocumentBuilder
+
+    if not quads:
+        return []
+    w, h = size
+    n = len(quads)
+    boxes = np.stack([np.float32(q).reshape(4, 2) for q in quads]) / np.float32([w, h])
+    doc = DocumentBuilder(resolve_lines=True, resolve_blocks=False, keep_reading_order=False)(
+        [np.zeros((1, 1, 3), np.uint8)], [boxes], [np.ones(n, np.float32)], [[(str(i), 1.0) for i in range(n)]],
+        [(h, w)], [[{"value": 0, "confidence": None}] * n])
+    return [int(word.value) for block in doc.pages[0].blocks for line in block.lines for word in line.words]

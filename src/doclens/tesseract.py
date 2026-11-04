@@ -113,37 +113,46 @@ class PageResult:
     texts: list[str]
 
 
-def parse_tsv(tsv: str) -> PageResult:
+def parse_tsv(tsv: str, words: bool = False) -> PageResult:
     """Lines from Tesseract's TSV output, in the order Tesseract wrote them. Level 5 rows are words;
     a line's text is its words joined by spaces, and its quadrilateral the smallest rectangle, at
     any angle, around its words' boxes. Tesseract's own line box (level 4) is upright, so on a
-    turned page it would also cover parts of the lines above and below; the words follow the line."""
+    turned page it would also cover parts of the lines above and below; the words follow the line.
+    With words=True every word is an entry of its own, with its own box, in the same order (M5)."""
     rows = [r.split("\t") for r in tsv.splitlines()]
     if not rows or rows[0][:1] != ["level"]:
         return PageResult([], [])
     head = {k: i for i, k in enumerate(rows[0])}
     order: list[tuple[int, ...]] = []
-    words: dict[tuple[int, ...], list[tuple[str, tuple[int, int, int, int]]]] = {}
+    words_of: dict[tuple[int, ...], list[tuple[str, tuple[int, int, int, int]]]] = {}
     for r in rows[1:]:
         if len(r) < len(head) or int(r[head["level"]]) != 5 or not r[head["text"]].strip():
             continue
         key = tuple(int(r[head[k]]) for k in ("page_num", "block_num", "par_num", "line_num"))
-        if key not in words:
+        if key not in words_of:
             order.append(key)
-            words[key] = []
+            words_of[key] = []
         x, y, w, h = (int(r[head[k]]) for k in ("left", "top", "width", "height"))
-        words[key].append((r[head["text"]].strip(), (x, y, x + w, y + h)))
+        words_of[key].append((r[head["text"]].strip(), (x, y, x + w, y + h)))
     quads, texts = [], []
+    if words:
+        for key in order:
+            for t, (x0, y0, x1, y1) in words_of[key]:
+                quads.append(order_quad(np.float32([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])))
+                texts.append(normalize(t))
+        return PageResult(quads, texts)
     for key in order:
-        corners = np.float32([[x, y] for _, (x0, y0, x1, y1) in words[key] for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))])
+        corners = np.float32([[x, y] for _, (x0, y0, x1, y1) in words_of[key]
+                              for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))])
         quads.append(order_quad(corners))
-        texts.append(normalize(" ".join(t for t, _ in words[key])))
+        texts.append(normalize(" ".join(t for t, _ in words_of[key])))
     return PageResult(quads, texts)
 
 
-def read_pages(images: list[np.ndarray], cfg: TessConfig, workers: int | None = None) -> list[PageResult]:
+def read_pages(images: list[np.ndarray], cfg: TessConfig, workers: int | None = None,
+               words: bool = False) -> list[PageResult]:
     """Page layout analysis and recognition (psm 3 unless cfg says otherwise), one page per
-    process, as many processes as cores."""
+    process, as many processes as cores; lines, or words with words=True."""
     workers = workers or os.cpu_count() or 1
     with tempfile.TemporaryDirectory(prefix="doclens_tess_") as d:
         paths = []
@@ -157,7 +166,7 @@ def read_pages(images: list[np.ndarray], cfg: TessConfig, workers: int | None = 
             # the setting, not the "tsv" config file: that file lives in Tesseract's own folder, which a
             # custom --tessdata-dir hides
             out = subprocess.run(_command(cfg, path) + ["-c", "tessedit_create_tsv=1"], capture_output=True, env=_env())
-            return parse_tsv(out.stdout.decode("utf8", errors="replace"))
+            return parse_tsv(out.stdout.decode("utf8", errors="replace"), words)
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
             return list(ex.map(one, paths))

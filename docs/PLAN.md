@@ -34,7 +34,7 @@ licence, and where does each one fail?
 | M2 Recognizer | Can a small CRNN trained from scratch beat Tesseract, also on fonts it never saw? | synthetic training lines drawn on the fly, CRNN with CTC, greedy and beam decoding, TinyGPT rescoring | the M1 sets, same metrics |
 | M3 Pages | How well are lines and blocks found, and does reading order hold on whole pages? | classical line finding (projections, connected components, XY cut) against docTR's pretrained detector and Tesseract's page analysis; reading order | synthetic pages and CORD receipts: page CER, line precision and recall, reading order |
 | M4 Fields | What does layout add to extracting fields? | LayoutLMv3 and LiLT against a text only model; true text against OCR text; explanations | CORD field F1 |
-| M5 Comparison | Where does DocLens stand against modern OCR? | one harness for PaddleOCR, Surya, EasyOCR, a small VLM and DocLens | the M1 sets and CORD's receipts: CER, field F1 through the same extractor, images per second, memory, licence |
+| M5 Comparison | Where does DocLens stand against modern OCR? | one harness for Tesseract, PaddleOCR, EasyOCR, two small vision language models (PaddleOCR VL, Surya 2) and DocLens | samples of the M1 sets, M3's synthetic pages and CORD's receipts: CER, page CER, field F1 through M4's extractors, speed, memory, licence |
 | M6 Ship | Can someone use it? | FastAPI service, Docker image, ONNX export, browser demo | latency and throughput, an end to end test |
 
 ## Data
@@ -673,13 +673,174 @@ headline numbers and findings in the README.
   fewer on true words), and validation scores flatter by 1.2 to 2.5 points, so test sets are scored
   once, after every choice is made.
 
+## Decisions in M5
+
+**43. Six systems, each run the way its makers show it, each in its own environment.**
+What: DocLens (M2's CRNN, M3's line finders, M4's extractors); Tesseract 5.5, as in M1 and M3;
+PaddleOCR 3.7 with the models it picks for the language it is told (for English PP OCRv6's medium
+detector and recognizer, for Hindi PP OCRv5's server detector and its Devanagari recognizer) and
+without its document orientation, unwarping and text line orientation models, as in its quick
+start; EasyOCR 1.7 (its CRAFT detector and its recognizer for the languages given); PaddleOCR VL
+1.6, the whole pipeline: its layout model (PP DocLayoutV3) on the CPU finds and orders a page's
+blocks, and its vision language model of 0.96 billion parameters, served on the Apple GPU by MLX VLM
+as its Apple silicon guide sets it up, reads each block; Surya 0.22, whose model Surya 2 (a vision
+language model of about 0.6 billion parameters) runs in llama.cpp's server on the Apple GPU, eight
+requests at a time, with Surya's default full page OCR. Every system has its own virtual
+environment with pinned versions (scripts/setup_m5.sh) and a small runner (scripts/m5/) that
+writes what the system read, the time it took and its peak memory, in one shape for all.
+Why: a comparison is fair only when each system runs as its users would run it, on the same
+machine. Separate environments because their pins clash: Surya wants Pillow below 11 and one exact
+OpenCV, MLX VLM a newer OpenCV, PaddleOCR its own framework. One output shape, so the scoring cannot
+differ between systems. PaddleOCR VL's whole pipeline because its guide warns that the model alone,
+run through Transformers, is not the system its published numbers come from. PaddleOCR's three
+preprocessing models are for photographed, warped or upside down documents and its quick start
+turns them off; every M5 page is upright.
+Why not larger vision language models (olmOCR and Qwen2.5 VL at 7 billion parameters, dots.ocr at
+about 3): too large or too slow for a 16 GB Mac; PaddleOCR VL and Surya 2 are the small document
+models that run on one. Why not PaddleOCR's PP StructureV3 for pages: PaddleOCR VL is Paddle's
+system for whole documents here, and the plain pipeline is what most people call PaddleOCR. Why
+not docTR as a whole system: its recognizers read Latin script only; its detector is already part
+of DocLens.
+
+**44. The same images and the same truth for every system, and the language a careful user would
+give.**
+What: scripts/m5_export.py writes every image once, exactly as M1 to M4 read it (grey PNG): a fixed
+random sample (seed 0) of 1,000 Mozhi test words, 1,000 synthetic test lines in the six held out
+fonts, 1,000 CORD test words and all 791 CORD test lines; the 150 synthetic test pages in the held
+out fonts (30 designs, each clean and under four kinds of damage); and CORD's 100 test receipts,
+masked as in M3. Tesseract, PaddleOCR and EasyOCR are told the language as in M1: Hindi for Mozhi,
+English for CORD, both for the synthetic lines and pages. DocLens and the two vision language
+models are told nothing.
+Why a sample of the crops: the vision language models read crops one request at a time, so the
+24,784 crops of the M1 sets would take each of them a night; 1,000 per set keep the intervals to a
+fraction of a point at these error rates, and since every system reads the same images, systems
+are compared in pairs. Why the held out fonts: DocLens trained on the other fonts; the other
+systems saw none of ours. Why grey: these are the pixels every earlier milestone scored.
+Why not the training fonts too: they would flatter DocLens alone.
+
+**45. Scored as before: M1's CER, M3's page CER, M4's field F1, on the images every system read.**
+What: CER per set (NFC, every run of spaces made one) with bootstrap intervals over images and a
+paired comparison with DocLens; page CER in each system's own order, with intervals over page
+designs on the synthetic pages (decision 37) and the page CER by layout and damage. On the
+receipts, field F1 through M4's extractors trained on true words, three seeds pooled: RoBERTa on
+each system's words in the order the system writes them, and LiLT on its words and their boxes put
+in the order DocLens reads receipts (docTR's rows), wherever the system gives boxes for lines or
+words, a line's box shared among its words by their length; beside them, the best any tagger could
+do on those words (the true fields moved onto them, as in M4). An image a system failed on counts as
+an empty reading. Surya writes every block as HTML, and PaddleOCR VL writes a table as HTML (on
+receipts its layout model often finds one); both become plain text before scoring, a line for each
+block, row or line break and a space between table cells.
+Why the system's own order for page CER and RoBERTa: it is what a user of the system gets. Why rows
+for LiLT: M4's extractors learned words in that order, and putting every system's words in the same
+order measures their reading, not their ordering. Why share a line's box: PaddleOCR, EasyOCR and
+PaddleOCR VL box lines, not words, and LiLT needs a box per word. M4 kept a docTR word read with a
+space inside as one word; here every system's text is split at spaces, so DocLens's field F1 can
+differ a little from M4's.
+Why not line F1: the vision language models give blocks, not lines, and M3 showed that line F1 can
+mislead (decision 34).
+
+**46. Speed and memory as each system runs on the Mac.**
+What: seconds per image from each runner's own clock, loading left out, with each system's own
+batching: DocLens 64 crops at a time on the GPU, Tesseract one process per core, PaddleOCR 16 crops
+at a time on the CPU (PaddlePaddle has no Apple GPU backend), EasyOCR one at a time on the GPU,
+Surya eight requests at a time, PaddleOCR VL through MLX VLM. Memory is the peak physical footprint
+of the runner's process plus that of the server holding the model; Tesseract's is its largest
+single process.
+Why: speed and memory decide what can be shipped on a laptop or a small server, and each system as
+it runs is what its users get. Why the physical footprint (macOS's own figure, the one Activity
+Monitor shows): on Apple silicon the CPU and the GPU share memory, and the resident size misses
+what the GPU holds for a process.
+Why not one batch size for all: each system's default is what its users get; one size would slow
+some systems and break others.
+
+**47. Licence beside accuracy.**
+What: the tables give each system's licence for its code and its weights. Tesseract, PaddleOCR,
+EasyOCR and PaddleOCR VL are Apache 2.0, code and models. Surya's code is Apache 2.0, but Surya 2's
+weights come under the AI PUBS OpenRAIL M licence, modified: no use by an organisation with more
+than $5 million of revenue or funding, nor in a product that competes with its maker's, except for
+personal use and research. DocLens is MIT, with docTR's detector (Apache 2.0) for receipts.
+Why: a system that cannot be shipped is not an option for a product, however accurate.
+
+**48. Two settings the Mac forces, measured before the full run.**
+What: (1) PaddleOCR's detector sees a page at most 1,600 pixels a side; the recognizer still reads
+each line cut from the full page. (2) PaddleOCR VL keeps the pipeline its Apple silicon guide sets
+up, its model served by MLX VLM, and a check beside the comparison reads 200 Mozhi words, 200
+synthetic lines and 100 CORD lines again with the model in Hugging Face Transformers, its reference
+implementation, in float32 on the CPU (scripts/m5/run_paddleocr_vl_ref.py), each crop sized as the
+pipeline sizes a text block. scripts/m5/probe.py measured both choices on the Mac first.
+Why (1): by default PaddleOCR detects on a page at its own size (up to 4,000 pixels a side), and
+on the Mac the first synthetic page was killed for lack of memory. PaddlePaddle for macOS is built
+without oneDNN (its build reports MKL off and ships no oneDNN library), so each convolution first
+unrolls the whole image, and one 9 by 9 convolution over 256 channels in the neck of PP OCRv5's
+server detector, at a quarter of a 300 dpi page's size, needs about 45 GB for that alone. On a
+synthetic page of 35 lines, limits of 960, 1,280 and 1,600 pixels all found the 35 lines, with page
+CER 1.8%, 1.7% and 1.8%, peaks of 6.2, 8.3 and 10.0 GB and 17.7, 21.9 and 25.8 s. The largest
+is used: it fits in the Mac's 16 GB and leaves 79 of CORD's 100 test receipts at their own size.
+The second smoke run then showed one process growing to 16.2 GB over three synthetic pages and
+three receipts: on the Mac PaddlePaddle takes CPU memory from a buddy allocator that keeps what it
+took, and pages of other sizes asked for more. So each set of pages is read in a process of its
+own, largest pages first, so later pages fit in what the first took. Even so, the full run's page
+processes peaked at 18.3 GB, more than the Mac's 16 GB: macOS compressed and swapped memory to hold
+them, and a synthetic page took 28.9 s against the probe's 25.8 s. The size was kept, because
+results already measured at it would otherwise have to be thrown away for a smaller one that the
+probe found no more accurate; the memory is reported as measured.
+Why not 960 (PaddleOCR 2's default for this setting): it saved memory and time but no accuracy on
+the probe's page, and would shrink 73 of the 100 receipts, whose print is small. Why not the mobile
+detector: the server detector is PaddleOCR's own choice for Hindi; only its input size had to change.
+Why (2): the first smoke run read clean Hindi crops as nonsense, and the probe found two causes.
+The model itself misreads Mozhi's words in every setting, the reference included: 57% to 66% CER
+on 10 words, "था" read as "41" by all six. How the Mac serves it costs the rest: on 10 synthetic
+lines the pipeline through MLX VLM reached 40% CER with the JPEG it sends and 27% with PNG,
+enlarging the crop first changed nothing, while the model in Transformers read the same lines at
+10% in float32 on the CPU and 16% in bfloat16 on the Apple GPU; on 10 CORD lines every setting was
+within a point (2.8% to 3.4%). So the comparison runs PaddleOCR VL as its makers set it up on a
+Mac, which is what a Mac user gets, and the check measures on 500 crops how much of its error the
+serving path adds, so the model is not blamed for it.
+Why not the reference implementation for everything: it is the model alone, without the pipeline's
+layout step, which PaddleOCR's guide says is not the same system; it took 3.3 s a crop on the CPU
+against 0.6 s, which over the pages would take days; and on the Apple GPU, in bfloat16, it no
+longer reads as the reference does. Why not send PNG: that changes the pipeline as shipped, and on
+10 lines it closed only part of the gap.
+
+## What M5 found, and what it means for M6
+
+The full tables are in `docs/results/m5_compare.md`, the diagnoses in `docs/results/m5_diagnostics.md`,
+the headline numbers and findings in the README.
+
+* **Ship DocLens's own pipeline.** Its CRNN reads crops best or level with the best on three of the
+  four sets (Mozhi words 0.5%, CORD lines 2.8%, CORD words 1.2% against PaddleOCR's 1.4%, p 0.38) and
+  is second only to Surya 2 on synthetic lines (1.0% against 0.7%); on receipts no system gives
+  measurably more correct fields (DocLens 78.9% through RoBERTa, 79.7% through LiLT; PaddleOCR's
+  words through LiLT 82.4%, p 0.06); and it reads a page in 1.1 s and a receipt in 0.37 s, where
+  the modern systems take 21 to 41 s a page and 2.5 to 13.7 s a receipt. It is MIT licensed and
+  its models are small.
+* **Surya 2 is the stronger reader of whole pages, but not one to ship here.** 0.4% page CER
+  against 1.6%, and 0.4% on photographed pages where DocLens reaches 4.7%; but 31 times slower,
+  14.9 GB with its server, and weights a company above $5 million of revenue may not use. Photos of
+  two column pages remain DocLens's weak spot (decision 36 and M3's findings).
+* **Reading order decides whole pages.** PaddleOCR and EasyOCR read two column pages straight
+  across: 75.1% and 76.2% page CER, against 2.0% and 5.7% with their own lines read column after
+  column. The service keeps DocLens's line finder for pages, whose cuts are its reading order.
+* **A reader that cannot invent text is worth something.** Both vision language models wrote text
+  that was not in the image: Surya 2 on 43 of 1,000 CORD words and 84 of 791 CORD lines,
+  PaddleOCR VL on 14 of the 150 synthetic pages, all of them noisy, turned or photographed; a CRNN
+  can only write what lies along its line. On a receipt, an invented line is worse than a misread
+  one, because nothing marks it.
+* **Checking the sums is still the cheapest guard on fields.** Every system's best field F1 stays
+  below 83%, and M4 found most lost fields one character off; M6 measures what a receipt's own
+  arithmetic catches.
+* **Measure serving paths, not just models.** PaddleOCR VL served by MLX VLM on the Mac read
+  synthetic lines at 14.7% against 11.2% in its reference implementation (p 0.03), so M6 checks
+  DocLens's ONNX graph against the PyTorch model before it ships and measures the service end to
+  end over HTTP.
+
 ## Decisions ahead
 
 Recorded here when each milestone is built. Already known:
 
-* **M5 licences.** Surya's code is Apache 2.0 but its weights use a modified OpenRAIL M licence
-  with limits on commercial use; PaddleOCR is Apache 2.0. The comparison reports licence next to
-  accuracy, because it decides what can be shipped.
+* **M6 serves on CPUs.** The service reads pages with the classical finder and receipts with
+  docTR's detector, so it must be told which kind of document it has (M3's findings); the
+  arithmetic of receipts is checked there (M4's findings).
 
 ## What runs where
 

@@ -19,6 +19,7 @@ fields.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -172,6 +173,27 @@ def ocr_receipt(rid: str, quads: list[np.ndarray], texts: list[str], size: tuple
     keep = [i for i, t in enumerate(texts) if normalize(t).strip()]
     return Receipt(rid, [normalize(texts[i]).strip() for i in keep], [np.float32(quads[i]) for i in keep], size,
                    image=image)
+
+
+def split_line(quad: np.ndarray, text: str) -> list[tuple[str, np.ndarray]]:
+    """The words of a line an OCR read as one piece, each with the part of the line's
+    quadrilateral (top left, top right, bottom right, bottom left) that its characters take, in
+    proportion to their number, spaces counted. M5 gives words their boxes this way for systems that
+    box lines, not words."""
+    text = normalize(text)
+    if not text:
+        return []
+    q = np.float32(quad).reshape(4, 2)
+    if " " not in text:                          # one word: the line's own box, unchanged
+        return [(text, q.copy())]
+    tl, tr, br, bl = q
+    n = len(text)
+    out = []
+    for m in re.finditer(r"\S+", text):
+        a, b = m.start() / n, m.end() / n
+        out.append((m.group(), np.float32([tl + (tr - tl) * a, tl + (tr - tl) * b, bl + (br - bl) * b,
+                                           bl + (br - bl) * a])))
+    return out
 
 
 def transfer(ocr: Receipt, truth: Receipt, share: float = 0.5) -> Receipt:

@@ -1,0 +1,325 @@
+{
+ "columns": {
+  "doclens": {
+   "pages": 75,
+   "own_order": 0.025052808597034515,
+   "by_columns": 0.029441561903980642
+  },
+  "tesseract": {
+   "pages": 75,
+   "own_order": 0.0684727548655688,
+   "by_columns": 0.12490720042657041
+  },
+  "paddleocr": {
+   "pages": 75,
+   "own_order": 0.7507680318287155,
+   "by_columns": 0.019819117737536147
+  },
+  "easyocr": {
+   "pages": 75,
+   "own_order": 0.7616004593835237,
+   "by_columns": 0.056553393080535676
+  },
+  "paddleocr_vl": {
+   "pages": 75,
+   "own_order": 0.3643731670802486,
+   "by_columns": 0.36733865179139064
+  },
+  "surya": {
+   "pages": 75,
+   "own_order": 0.004327228727876786,
+   "by_columns": 0.009175365558540637
+  }
+ },
+ "invented": {
+  "crops": {
+   "mozhi": {
+    "doclens": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "tesseract": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "paddleocr": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "easyocr": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "paddleocr_vl": {
+     "crops": 1000,
+     "too_long": 19,
+     "share_of_edits": 0.19150943396226416
+    },
+    "surya": {
+     "crops": 1000,
+     "too_long": 23,
+     "share_of_edits": 0.4583883751651255
+    }
+   },
+   "synth": {
+    "doclens": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "tesseract": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "paddleocr": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "easyocr": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "paddleocr_vl": {
+     "crops": 1000,
+     "too_long": 12,
+     "share_of_edits": 0.12201693610469592
+    },
+    "surya": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    }
+   },
+   "cord_word": {
+    "doclens": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "tesseract": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "paddleocr": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "easyocr": {
+     "crops": 1000,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "paddleocr_vl": {
+     "crops": 1000,
+     "too_long": 19,
+     "share_of_edits": 0.33570159857904086
+    },
+    "surya": {
+     "crops": 1000,
+     "too_long": 43,
+     "share_of_edits": 0.7842220143436234
+    }
+   },
+   "cord_line": {
+    "doclens": {
+     "crops": 791,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "tesseract": {
+     "crops": 791,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "paddleocr": {
+     "crops": 791,
+     "too_long": 0,
+     "share_of_edits": 0.0
+    },
+    "easyocr": {
+     "crops": 791,
+     "too_long": 2,
+     "share_of_edits": 0.014799154334038054
+    },
+    "paddleocr_vl": {
+     "crops": 791,
+     "too_long": 21,
+     "share_of_edits": 0.25784645098986
+    },
+    "surya": {
+     "crops": 791,
+     "too_long": 84,
+     "share_of_edits": 0.5840724665031138
+    }
+   }
+  },
+  "pages": {
+   "synth": {
+    "doclens": {
+     "pages": 150,
+     "too_long": 0,
+     "ids": []
+    },
+    "tesseract": {
+     "pages": 150,
+     "too_long": 0,
+     "ids": []
+    },
+    "paddleocr": {
+     "pages": 150,
+     "too_long": 0,
+     "ids": []
+    },
+    "easyocr": {
+     "pages": 150,
+     "too_long": 0,
+     "ids": []
+    },
+    "paddleocr_vl": {
+     "pages": 150,
+     "too_long": 14,
+     "ids": [
+      "synth/deva_1col_00_skew",
+      "synth/deva_1col_02_noise",
+      "synth/deva_1col_03_skew",
+      "synth/deva_1col_04_noise",
+      "synth/deva_1col_04_skew",
+      "synth/deva_2col_03_skew",
+      "synth/deva_2col_04_noise",
+      "synth/deva_2col_04_skew",
+      "synth/deva_2col_04_photo",
+      "synth/mixed_1col_00_photo"
+     ]
+    },
+    "surya": {
+     "pages": 150,
+     "too_long": 0,
+     "ids": []
+    }
+   },
+   "cord": {
+    "doclens": {
+     "pages": 100,
+     "too_long": 1,
+     "ids": [
+      "cord/89"
+     ]
+    },
+    "tesseract": {
+     "pages": 100,
+     "too_long": 2,
+     "ids": [
+      "cord/50",
+      "cord/81"
+     ]
+    },
+    "paddleocr": {
+     "pages": 100,
+     "too_long": 0,
+     "ids": []
+    },
+    "easyocr": {
+     "pages": 100,
+     "too_long": 1,
+     "ids": [
+      "cord/36"
+     ]
+    },
+    "paddleocr_vl": {
+     "pages": 100,
+     "too_long": 2,
+     "ids": [
+      "cord/76",
+      "cord/96"
+     ]
+    },
+    "surya": {
+     "pages": 100,
+     "too_long": 3,
+     "ids": [
+      "cord/49",
+      "cord/89",
+      "cord/96"
+     ]
+    }
+   }
+  }
+ },
+ "script": {
+  "mozhi": {
+   "doclens": {
+    "wrong_script": 0.0
+   },
+   "tesseract": {
+    "wrong_script": 0.0
+   },
+   "paddleocr": {
+    "wrong_script": 0.0
+   },
+   "easyocr": {
+    "wrong_script": 0.0
+   },
+   "paddleocr_vl": {
+    "wrong_script": 0.099
+   },
+   "surya": {
+    "wrong_script": 0.007
+   }
+  },
+  "synth": {
+   "doclens": {
+    "wrong_script": 0.0
+   },
+   "tesseract": {
+    "wrong_script": 0.046
+   },
+   "paddleocr": {
+    "wrong_script": 0.0
+   },
+   "easyocr": {
+    "wrong_script": 0.015
+   },
+   "paddleocr_vl": {
+    "wrong_script": 0.022
+   },
+   "surya": {
+    "wrong_script": 0.0
+   }
+  },
+  "lone_danda": {
+   "doclens": {
+    "words": 52,
+    "misread": 0
+   },
+   "tesseract": {
+    "words": 52,
+    "misread": 48
+   },
+   "paddleocr": {
+    "words": 52,
+    "misread": 51
+   },
+   "easyocr": {
+    "words": 52,
+    "misread": 52
+   },
+   "paddleocr_vl": {
+    "words": 52,
+    "misread": 52
+   },
+   "surya": {
+    "words": 52,
+    "misread": 52
+   }
+  }
+ }
+}

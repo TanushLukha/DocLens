@@ -18,7 +18,7 @@ consonant, so a word cannot be cut into separate characters the way an English w
 | ✅ done | **M2 Recognizer** | a CRNN trained with CTC loss from scratch on synthetic lines and real words and receipts; greedy and beam decoding; rescoring with TinyGPT; tested on fonts it never saw, with intervals and paired tests against Tesseract |
 | ✅ done | **M3 Pages** | finding lines on whole pages (a classical finder against docTR's detector and Tesseract), reading order, whole page accuracy, on synthetic Hindi and English pages and real receipts |
 | ✅ done | **M4 Fields** | key information extraction on receipts: layout aware transformers (LayoutLMv3, LiLT) against a text only model, what layout adds, explanations |
-| planned | **M5 Comparison** | DocLens against PaddleOCR, Surya, EasyOCR and a small vision language model: accuracy, speed, memory, licence |
+| ✅ done | **M5 Comparison** | DocLens against Tesseract, PaddleOCR, EasyOCR and two small vision language models (PaddleOCR VL, Surya 2) on the same images: accuracy, fields, speed, memory, licence |
 | planned | **M6 Ship** | FastAPI service, Docker image, ONNX export, a demo that runs in the browser |
 
 **M2 in one line:** a CRNN of 4.1 million parameters, trained from scratch on a laptop, reads
@@ -33,6 +33,12 @@ receipts at 5.6% (Tesseract 51.8%).
 **M4 in one line:** on CORD's receipts, boxes and the image add nothing measurable to a text model
 reading the words in order (93.4% to 93.9% field F1 on true words); what loses fields is the OCR:
 from its words the extractors get 78.9% to 80.5%, and perfect tagging could get only 85.2%.
+
+**M5 in one line:** on the same images as Tesseract, PaddleOCR, EasyOCR, PaddleOCR VL and Surya 2,
+DocLens reads Hindi words and receipt lines best (0.5% and 2.8% CER), gets as many receipt fields
+right as any of them (78.9% field F1; none measurably more) and reads a page in 1.1 s; only Surya 2
+reads whole Hindi pages better (0.4% page CER against 1.6%), 31 times slower and under weights a
+company above $5 million of revenue may not use.
 
 The plan, the data and every design decision (what, why, and why not the alternatives) are in
 [docs/PLAN.md](docs/PLAN.md).
@@ -132,6 +138,24 @@ caffeinate bash scripts/run_m4.sh                   # every training run, then t
 check, and LiLT on OCR words, then scores every run on the test receipts
 (`docs/results/m4_fields.md`), and counts the fields the OCR loses (`docs/results/m4_ocr_losses.md`).
 A finished run is skipped when the script starts again.
+
+## Run M5 on a Mac
+
+Every system gets its own environment, because their pinned dependencies clash. Surya runs its
+model in llama.cpp's server (installed with Homebrew) and PaddleOCR VL in MLX VLM's, both on the
+Apple GPU; models download on first use.
+
+```bash
+bash scripts/setup_m5.sh                    # four environments and llama.cpp
+bash scripts/m5/probe.sh                    # the two checks behind decision 48 (about 15 minutes)
+bash scripts/run_m5.sh smoke                # 3 images of each set per system, readings shown: checks every runner
+caffeinate bash scripts/run_m5.sh           # every system on every image, then the scores (a night)
+```
+
+`scripts/m5_export.py` (run by the first) writes the images every system reads to `data/m5/`; the
+runners in `scripts/m5/` write what each system read to `runs/m5/`, and `scripts/m5_score.py` scores
+them all the same way (`docs/results/m5_compare.md`). Images a system has read are skipped when
+the script starts again.
 
 ## Results (M1, the Tesseract baseline)
 
@@ -369,6 +393,86 @@ CORD sometimes makes a ":" a field of its own inside another field of the same c
   for LiLT and 44 for LayoutLMv3, which takes each batch in two halves because whole batches ran
   out of GPU memory (decision 40). All 14 runs took about six hours.
 
+## Results (M5, DocLens against other OCR systems)
+
+Six systems read the same images on the M2 MacBook Air, each as its makers show it and in its own
+environment (decision 43 in the plan): DocLens, Tesseract 5.5, PaddleOCR 3.7, EasyOCR 1.7, PaddleOCR
+VL 1.6 (a vision language model of 0.9 billion parameters, served on the Apple GPU by MLX VLM as its
+Apple silicon guide sets it up) and Surya 0.22 (its vision language model Surya 2 in llama.cpp).
+The images: a fixed random sample of 1,000 Mozhi words, 1,000 synthetic lines in the six fonts
+DocLens never trained on, 1,000 CORD words and all 791 CORD lines; the 150 synthetic test pages in
+those fonts; CORD's 100 test receipts. Scored as before: CER, page CER, and field F1 through M4's
+extractors; bootstrap 95% intervals, every system paired with DocLens on the same images. The run
+took 8 hours. Every table is in [docs/results/m5_compare.md](docs/results/m5_compare.md), the
+diagnoses in [docs/results/m5_diagnostics.md](docs/results/m5_diagnostics.md).
+
+Reading crops (CER) and speed:
+
+| System | Mozhi words | Synthetic lines, unseen fonts | CORD words | CORD lines | Synthetic lines per second |
+|---|---:|---:|---:|---:|---:|
+| DocLens | **0.5%** | 1.0% | **1.2%** | **2.8%** | 82 |
+| Tesseract | 6.5% | 3.1% | 20.6% | 42.8% | 34 (8 processes) |
+| PaddleOCR | 5.2% | 7.0% | 1.4% | 8.6% | 4.5 (CPU) |
+| EasyOCR | 6.8% | 3.5% | 17.5% | 21.9% | 13.5 |
+| PaddleOCR VL 1.6 | 56.6% | 13.9% | 11.7% | 16.0% | 1.2 |
+| Surya 2 | 20.2% | **0.7%** | 66.6% | 41.0% | 2.0 |
+
+Whole pages (page CER) and fields on receipts (field F1):
+
+| System | Synthetic pages | one column | two columns | Seconds per page | Receipts | Fields, RoBERTa | Fields, LiLT | Seconds per receipt | Peak memory |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| DocLens | 1.6% | 0.5% | 2.5% | 1.1 | **6.0%** | 78.9% | 79.7% | 0.37 | 4.9 GB |
+| Tesseract | 9.7% | 12.8% | 6.8% | 1.7 | 51.8% | 32.1% | 38.0% | 0.08 | 0.2 GB |
+| PaddleOCR | 40.5% | 1.6% | 75.1% | 28.9 | 11.5% | 73.7% | **82.4%** | 5.2 | 18.3 GB |
+| EasyOCR | 48.2% | 16.7% | 76.2% | 20.8 | 25.9% | 29.2% | 31.5% | 2.5 | 21.2 GB |
+| PaddleOCR VL 1.6 | 37.5% | 38.7% | 36.4% | 40.7 | 8.3% | **79.4%** | 78.0% | 4.1 | 11.8 GB |
+| Surya 2 | **0.4%** | 0.4% | 0.4% | 33.8 | 13.7% | 78.2% | | 13.7 | 14.9 GB |
+
+RoBERTa reads each system's words in the order the system gives them; LiLT reads its words with
+their boxes in rows, as DocLens reads receipts, for systems that box lines or words (Surya gives
+blocks). Peak memory is the physical footprint of the system's process and of the server holding
+its model, on a Mac with 16 GB; Tesseract's is one of its eight processes.
+
+* **DocLens reads crops best, or level with the best, on three of the four sets.** Mozhi's Hindi
+  words at 0.5% (the next, PaddleOCR, 5.2%), CORD's lines at 2.8% (PaddleOCR 8.6%), and CORD's words
+  at 1.2%, level with PaddleOCR's 1.4% (p 0.38). Only on synthetic lines is it second: Surya 2
+  reads them at 0.7% against 1.0% (0.25 points fewer, p 0.03). And it is one of the fastest: 82
+  synthetic lines a second, against 1.2 to 13.5 for the modern systems.
+* **Surya 2 reads whole Hindi and English pages best,** at 0.4% page CER against DocLens's 1.6%
+  (1.2 points fewer, p 0.006), and stays at 0.4% on photographed pages, where DocLens reaches 4.7%.
+  But it takes 33.8 s a page against 1.1 s, needs 14.9 GB with its server, and its weights may
+  not be used by a company above $5 million of revenue or funding, nor in a competing product.
+* **On receipts, no system gets measurably more fields right than DocLens.** PaddleOCR's words
+  through LiLT come closest (82.4% against 79.7%, p 0.06); PaddleOCR VL (79.4%) and Surya 2
+  (78.2%) are level with DocLens's 78.9% through RoBERTa; Tesseract and EasyOCR get fewer than half
+  as many (29.2% to 38.0%). DocLens reads the receipts with the lowest page CER, 6.0% (PaddleOCR VL
+  8.3%, p 0.23).
+* **Two systems lose two column pages to their reading order alone.** PaddleOCR reads one column
+  pages at 1.6% but two column pages at 75.1%, EasyOCR at 16.7% and 76.2%: both read straight
+  across the columns. Their lines read column after column would give 2.0% and 5.7% (a diagnosis
+  that uses where the columns are). DocLens's line finder keeps the columns apart (2.5%).
+* **The vision language models write text that is not there.** On short crops Surya 2 counts,
+  names or titles: "BASO" became "1 2 3 4 5 6 7 8 9 10...", "PB1" "DEPARTMENT OF JUSTICE"; 43 of
+  the 1,000 CORD words make 78% of its errors there, and on CORD's lines it adds the neighbouring
+  lines that show at the crop's edges. On two receipts it wrote a description instead ("This is a
+  simple table with a single column..."), and on a third it repeated dates. PaddleOCR VL writes 9.9%
+  of Mozhi's Hindi words partly in other
+  scripts (Japanese, Tibetan, Bengali), and on damaged synthetic pages it continues the text with
+  fluent Hindi that is not on the page: 14 of 150 pages come out more than one and a half times
+  too long, and photographed pages at 62.2%. DocLens, whose recognizer can only write what lies
+  along its line, read no crop more than twice too long.
+* **The Mac's way of serving PaddleOCR VL costs it a little, the model more.** Read again by the
+  model in Hugging Face Transformers (its reference implementation, float32 on the CPU), 200
+  synthetic lines fall from 14.7% to 11.2% CER (p 0.03), and 200 Mozhi words only from 48.8% to
+  42.0% (p 0.08): it is the model that cannot read isolated Hindi words (decision 48).
+* **A lone danda (।) is read by DocLens alone:** it misreads none of Mozhi's 52, every other system
+  48 to 52, as Tesseract did in M1 and the CRNN trained on synthetic lines only did in M2.
+* **Memory.** PaddleOCR's page detector on the CPU peaked at 18.3 GB with its input limited to
+  1,600 pixels a side (at its default size it would need about 45 GB, decision 48), and EasyOCR's
+  detector on the GPU at 21.2 GB: more than the Mac's 16 GB, so macOS compressed and swapped memory
+  to hold them. DocLens's models are small (the CRNN has 4.1 million parameters); its 4.9 GB is
+  what PyTorch held on the Apple GPU while reading.
+
 ## Layout
 
 ```
@@ -400,7 +504,9 @@ src/doclens/
 scripts/          check_env, get_data, make_synth, eval_tesseract, plot_m1, run_m1.sh,
                   prepare_m2, bench_m2, train_crnn, eval_crnn, compare_runs, run_m2.sh,
                   make_pages, eval_pages, prepare_m4, bench_m4, train_kie, eval_kie, ocr_losses,
-                  run_m4.sh
+                  run_m4.sh, m5_export, m5_score, m5_diagnose, setup_m5.sh, run_m5.sh
+scripts/m5/       one runner per OCR system for M5, each run in that system's own environment,
+                  and probe.py, the checks behind decision 48
 tests/            unit tests for all of the above
 .github/          CI: lint, type checks and tests on every push
 fonts/            35 font files with their licences (fonts/README.md)
