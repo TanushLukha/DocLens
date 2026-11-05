@@ -7,6 +7,7 @@ runs share one baseline.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -60,7 +61,7 @@ def render_line(text: str, deva: Font, latn: Font, size: int, *, latin_in_deva_f
         pil = f.pil(size)
         left, top, right, bottom = pil.getbbox(s, anchor="ls")     # ink box relative to the baseline
         boxes.append((x, s, pil))
-        above, below = max(above, -top), max(below, bottom)
+        above, below = max(above, math.ceil(-top)), max(below, math.ceil(bottom))
         x += pil.getlength(s)
     w = int(np.ceil(x)) + pad[0] + pad[2]
     h = above + below + pad[1] + pad[3]

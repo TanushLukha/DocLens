@@ -206,7 +206,7 @@ The full tables are in `docs/results/m1_tesseract.md`, the headline numbers in t
 **15. A CRNN trained with CTC, one model for both scripts.**
 What: seven convolutions with batch normalisation turn every 4 pixel wide slice of a line into a
 feature vector; two bidirectional LSTM layers (256 units each way) read the slices in both
-directions; a linear layer scores 258 classes per slice. About 4 million parameters. CTC loss.
+directions; a linear layer scores 260 classes per slice. About 4 million parameters. CTC loss.
 Why: the standard recognizer for printed lines, small enough to train on a laptop GPU, and CTC
 needs no character positions, only the text of each line. One alphabet holds Devanagari and
 Latin, so the model is never told the language (M1: telling Tesseract both costs accuracy).
@@ -216,7 +216,7 @@ Why not fine tune a pretrained model: M2's question is what a model built from s
 pretrained readers come in M5.
 
 **16. Code points as output units.**
-What: each class is one Unicode code point after NFC (257 characters plus the blank); a conjunct
+What: each class is one Unicode code point after NFC (259 characters plus the blank); a conjunct
 such as क्ष is read as क, virama, ष.
 Why: the scorer counts code points, any conjunct can be written, and the output layer stays
 small. Why not aksharas (written syllables): thousands of classes, most of them rare, and a
@@ -925,6 +925,22 @@ The tables are in `docs/results/m6_service.md` and `docs/results/m6_checks.md`.
 * **Sums flag, they do not fix.** A failing sum points at a receipt with a wrong amount 85% of the
   time, but finds only a third of them, and changing a digit to make a sum hold is right a third of
   the time; the service reports the sums and leaves the fields as read.
+
+## After M6: CI made to pass
+
+**55. Type checks against the newest libraries, as CI installs them.**
+What: the type check step had failed on every push since the first M2 commit, so CI's tests and its
+image job never ran. The causes were stricter type stubs in the newest releases that CI installs:
+numpy 2.5 types `np.float32([...])` as a scalar, OpenCV 5 marks `imread` and `imdecode` as possibly
+returning nothing, PyTorch's ONNX exporter returns an optional program, and Transformers' config
+classes and doctr's document builder type their arguments. The code now builds arrays with
+`np.array(..., np.float32)`, checks every result that can be missing, and types its keyword
+dictionaries. Nothing changes at run time (the same arrays and values): the 121 tests pass with the
+newest numpy, OpenCV and Pillow, and the type check is clean with the newest PyTorch too.
+Why: a check that always fails checks nothing; the type errors hid whether the tests and the image
+would pass on a clean machine. Why not pin every version in CI: a pinned CI checks an environment
+nobody installs; `pyproject.toml` allows the newest releases, so CI keeps checking those, and a
+failure there is an early warning about what a new user would get.
 
 ## What runs where
 

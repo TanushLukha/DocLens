@@ -11,6 +11,8 @@ words themselves come out too, in the default order.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import cv2
 import numpy as np
 
@@ -43,15 +45,17 @@ class DoctrLines:
             return {}, (h, w)
         boxes, scores = detach_scores([found])
         n = len(boxes[0])
-        return {name: self.builders[name]([rgb], boxes, scores, [[("", 1.0)] * n], [(h, w)],
-                                          [[{"value": 0, "confidence": None}] * n]) for name in names}, (h, w)
+        orientations: list[Any] = [[{"value": 0, "confidence": None}] * n]     # one list per page
+        return {name: self.builders[name]([rgb], boxes, scores, [[("", 1.0)] * n], [(h, w)], orientations)
+                for name in names}, (h, w)
 
     @staticmethod
     def _quad(geometry, w: int, h: int) -> np.ndarray:
         g = np.asarray(geometry, np.float32)
         if g.shape == (2, 2):                              # a straight box: (x0, y0), (x1, y1)
-            g = np.float32([[g[0, 0], g[0, 1]], [g[1, 0], g[0, 1]], [g[1, 0], g[1, 1]], [g[0, 0], g[1, 1]]])
-        return order_quad(g * np.float32([w, h]))
+            g = np.array([[g[0, 0], g[0, 1]], [g[1, 0], g[0, 1]], [g[1, 0], g[1, 1]], [g[0, 0], g[1, 1]]],
+                         np.float32)
+        return order_quad(g * np.array([w, h], np.float32))
 
     def __call__(self, page: np.ndarray) -> dict[str, list[np.ndarray]]:
         """Line quadrilaterals in page pixels, in docTR's reading order ('order') and in its default
@@ -80,8 +84,9 @@ def rows_order(quads: list[np.ndarray], size: tuple[int, int]) -> list[int]:
         return []
     w, h = size
     n = len(quads)
-    boxes = np.stack([np.float32(q).reshape(4, 2) for q in quads]) / np.float32([w, h])
+    boxes = np.stack([np.array(q, np.float32).reshape(4, 2) for q in quads]) / np.array([w, h], np.float32)
+    orientations: list[Any] = [[{"value": 0, "confidence": None}] * n]         # one list per page
     doc = DocumentBuilder(resolve_lines=True, resolve_blocks=False, keep_reading_order=False)(
         [np.zeros((1, 1, 3), np.uint8)], [boxes], [np.ones(n, np.float32)], [[(str(i), 1.0) for i in range(n)]],
-        [(h, w)], [[{"value": 0, "confidence": None}] * n])
+        [(h, w)], orientations)
     return [int(word.value) for block in doc.pages[0].blocks for line in block.lines for word in line.words]

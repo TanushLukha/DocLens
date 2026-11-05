@@ -19,6 +19,7 @@ import random
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -154,7 +155,10 @@ def tensors(batch: list[Example], kind: str, device) -> dict:
     if kind in ("lilt", "layoutlmv3"):
         t["bbox"] = torch.from_numpy(np.stack([e.bbox for e in batch])).to(device)
     if kind == "layoutlmv3":
-        px = np.stack([e.pixels for e in batch]).astype(np.float32) / 255.0      # (B, 224, 224, 3)
+        images = [e.pixels for e in batch if e.pixels is not None]
+        if len(images) != len(batch):
+            raise ValueError("every LayoutLMv3 window needs its receipt's image")
+        px = np.stack(images).astype(np.float32) / 255.0                         # (B, 224, 224, 3)
         t["pixel_values"] = ((torch.from_numpy(px).permute(0, 3, 1, 2) - 0.5) / 0.5).to(device)
     return t
 
@@ -310,8 +314,9 @@ def tiny_tokenizer(texts: list[str], vocab: int = 1000):
 def tiny_config(kind: str, vocab: int):
     """The architecture of each model at a tiny size: 2 layers of 48 units."""
     import transformers
-    common = dict(vocab_size=vocab, hidden_size=48, num_hidden_layers=2, num_attention_heads=2, intermediate_size=64,
-                  max_position_embeddings=LENGTHS[-1] + 8, pad_token_id=1, bos_token_id=0, eos_token_id=2)
+    common: dict[str, Any] = dict(vocab_size=vocab, hidden_size=48, num_hidden_layers=2, num_attention_heads=2,
+                                  intermediate_size=64, max_position_embeddings=LENGTHS[-1] + 8, pad_token_id=1,
+                                  bos_token_id=0, eos_token_id=2)
     if kind == "roberta":
         return transformers.RobertaConfig(**common, type_vocab_size=1)
     if kind == "lilt":

@@ -66,7 +66,7 @@ def order_quad(pts) -> np.ndarray:
 
 
 def box_quad(x0: float, y0: float, x1: float, y1: float) -> np.ndarray:
-    return np.float32([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
+    return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], np.float32)
 
 
 def quad_size(quad: np.ndarray) -> tuple[float, float]:
@@ -88,9 +88,10 @@ def crop_line(img: np.ndarray, quad: np.ndarray, margin: float = 0.15) -> np.nda
     m = margin * h
     u = (q[1] - q[0]) / max(np.linalg.norm(q[1] - q[0]), 1e-6)       # along the line
     v = (q[3] - q[0]) / max(np.linalg.norm(q[3] - q[0]), 1e-6)       # down across it
-    src = np.float32([q[0] - m * u - m * v, q[1] + m * u - m * v, q[2] + m * u + m * v, q[3] - m * u + m * v])
+    src = np.array([q[0] - m * u - m * v, q[1] + m * u - m * v, q[2] + m * u + m * v, q[3] - m * u + m * v],
+                   np.float32)
     W, H = int(round(w + 2 * m)), int(round(h + 2 * m))
-    dst = np.float32([[0, 0], [W, 0], [W, H], [0, H]])
+    dst = np.array([[0, 0], [W, 0], [W, H], [0, H]], np.float32)
     t = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, t, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
@@ -111,7 +112,7 @@ def write_set(folder: Path, pages: list[tuple[np.ndarray, Page]]) -> None:
 def read_set(name: str, root: Path | None = None) -> list[Page]:
     folder = (root or PAGES) / name
     rows = json.loads((folder / "labels.json").read_text(encoding="utf8"))["pages"]
-    return [Page(r["id"], [Line(np.float32(line["quad"]), line["text"]) for line in r["lines"]], r["meta"],
+    return [Page(r["id"], [Line(np.array(line["quad"], np.float32), line["text"]) for line in r["lines"]], r["meta"],
                  folder / r["file"]) for r in rows]
 
 
@@ -130,7 +131,7 @@ def mask_to_annotations(img: np.ndarray, words: list[np.ndarray], ignore: list[n
     word height), and over separators and regions CORD marks as not to be read."""
     heights = [quad_size(q)[1] for q in words]
     pad = int(round(max(4.0, float(np.median(heights)))))
-    keep = np.zeros(img.shape[:2], np.uint8)
+    keep: np.ndarray = np.zeros(img.shape[:2], np.uint8)
     hull = cv2.convexHull(np.concatenate(words).astype(np.float32)).astype(np.int32)
     cv2.fillConvexPoly(keep, hull, 255)
     keep = cv2.dilate(keep, np.ones((2 * pad + 1, 2 * pad + 1), np.uint8))

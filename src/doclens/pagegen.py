@@ -129,7 +129,8 @@ class Canvas:
             return False
         region = self.img[top:top + h, left:left + w]
         np.minimum(region, r.image, out=region)
-        self.lines.append(Line(box_quad(left + xs.min(), top + ys.min(), left + xs.max() + 1, top + ys.max() + 1), text))
+        x0, y0, x1, y1 = (float(v) for v in (left + xs.min(), top + ys.min(), left + xs.max() + 1, top + ys.max() + 1))
+        self.lines.append(Line(box_quad(x0, y0, x1, y1), text))
         return True
 
 
@@ -195,8 +196,8 @@ def rotate(img: np.ndarray, angle: float) -> tuple[np.ndarray, np.ndarray]:
 
 def perspective(img: np.ndarray, rng: np.random.Generator, strength: float = 0.04) -> tuple[np.ndarray, np.ndarray]:
     h, w = img.shape
-    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
-    dst = (src + rng.uniform(-strength, strength, (4, 2)) * np.float32([w * 0.25, h])).astype(np.float32)
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]], np.float32)
+    dst = (src + rng.uniform(-strength, strength, (4, 2)) * np.array([w * 0.25, h], np.float32)).astype(np.float32)
     m = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, m, (w, h), flags=cv2.INTER_LINEAR, borderValue=int(np.median(img))), m
 

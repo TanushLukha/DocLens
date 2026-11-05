@@ -35,9 +35,10 @@ class Item:
         if self.array is not None:
             img = self.array
         else:
-            img = cv2.imread(str(self.path), cv2.IMREAD_GRAYSCALE)
-            if img is None:
+            read = cv2.imread(str(self.path), cv2.IMREAD_GRAYSCALE)
+            if read is None:
                 raise OSError(f"cannot read {self.path}")
+            img = read
         return add_margin(img, self.margin) if self.margin else img
 
 
@@ -118,8 +119,8 @@ def _decode(image_field) -> np.ndarray:
 def _quad(q) -> np.ndarray:
     """CORD writes a quad as {x1, y1, ..., x4, y4}, clockwise from the top left; lists are accepted too."""
     if isinstance(q, dict):
-        return np.float32([[q["x1"], q["y1"]], [q["x2"], q["y2"]], [q["x3"], q["y3"]], [q["x4"], q["y4"]]])
-    return np.float32(q).reshape(4, 2)
+        return np.array([[q["x1"], q["y1"]], [q["x2"], q["y2"]], [q["x3"], q["y3"]], [q["x4"], q["y4"]]], np.float32)
+    return np.array(q, np.float32).reshape(4, 2)
 
 
 def crop_quad(img: np.ndarray, quad: np.ndarray, margin: float = 0.15) -> np.ndarray:
@@ -129,7 +130,7 @@ def crop_quad(img: np.ndarray, quad: np.ndarray, margin: float = 0.15) -> np.nda
     if w < 2 or h < 2:
         raise ValueError("degenerate quad")
     m = int(round(margin * h))
-    dst = np.float32([[m, m], [m + w, m], [m + w, m + h], [m, m + h]])
+    dst = np.array([[m, m], [m + w, m], [m + w, m + h], [m, m + h]], np.float32)
     t = cv2.getPerspectiveTransform(quad, dst)
     return cv2.warpPerspective(img, t, (w + 2 * m, h + 2 * m), flags=cv2.INTER_CUBIC,
                                borderMode=cv2.BORDER_REPLICATE)

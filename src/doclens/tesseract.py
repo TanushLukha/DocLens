@@ -138,12 +138,12 @@ def parse_tsv(tsv: str, words: bool = False) -> PageResult:
     if words:
         for key in order:
             for t, (x0, y0, x1, y1) in words_of[key]:
-                quads.append(order_quad(np.float32([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])))
+                quads.append(order_quad(np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], np.float32)))
                 texts.append(normalize(t))
         return PageResult(quads, texts)
     for key in order:
-        corners = np.float32([[x, y] for _, (x0, y0, x1, y1) in words_of[key]
-                              for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))])
+        corners = np.array([[x, y] for _, (x0, y0, x1, y1) in words_of[key]
+                              for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))], np.float32)
         quads.append(order_quad(corners))
         texts.append(normalize(" ".join(t for t, _ in words_of[key])))
     return PageResult(quads, texts)

@@ -46,6 +46,8 @@ def export(model, alphabet: Alphabet, path: str | Path) -> Path:
     program = torch.onnx.export(_WithLogSoftmax(model).eval(), (x, widths), input_names=["images", "widths"],
                                 output_names=["logprobs", "lengths"], dynamo=True, verbose=False,
                                 dynamic_shapes={"images": {0: batch, 3: width}, "widths": {0: batch}})
+    if program is None:
+        raise RuntimeError("the ONNX exporter returned no program")
     program.save(str(path))
     import onnx
     dims = [[d.dim_param or d.dim_value for d in i.type.tensor_type.shape.dim] for i in onnx.load(str(path)).graph.input]

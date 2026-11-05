@@ -417,7 +417,7 @@ CORD sometimes makes a ":" a field of its own inside another field of the same c
 
 Six systems read the same images on the M2 MacBook Air, each as its makers show it and in its own
 environment (decision 43 in the plan): DocLens, Tesseract 5.5, PaddleOCR 3.7, EasyOCR 1.7, PaddleOCR
-VL 1.6 (a vision language model of 0.9 billion parameters, served on the Apple GPU by MLX VLM as its
+VL 1.6 (a vision language model of 0.96 billion parameters, served on the Apple GPU by MLX VLM as its
 Apple silicon guide sets it up) and Surya 0.22 (its vision language model Surya 2 in llama.cpp).
 The images: a fixed random sample of 1,000 Mozhi words, 1,000 synthetic lines in the six fonts
 DocLens never trained on, 1,000 CORD words and all 791 CORD lines; the 150 synthetic test pages in

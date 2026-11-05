@@ -36,7 +36,10 @@ def low_dpi(img: Image, rng: np.random.Generator, scale: float = 0.45) -> Image:
 
 def jpeg(img: Image, rng: np.random.Generator, quality: tuple[int, int] = (15, 30)) -> Image:
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, int(rng.integers(*quality))])
-    return cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
+    out = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
+    if out is None:
+        raise RuntimeError("the JPEG round trip gave no image")
+    return out
 
 
 def rotate(img: Image, angle: float, fill: int | None = None) -> Image:
@@ -67,8 +70,8 @@ def shadow(img: Image, rng: np.random.Generator, depth: tuple[float, float] = (0
 
 def perspective(img: Image, rng: np.random.Generator, strength: float = 0.06) -> Image:
     h, w = img.shape
-    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
-    jitter = rng.uniform(-strength, strength, (4, 2)) * np.float32([w * 0.25, h])
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]], np.float32)
+    jitter = rng.uniform(-strength, strength, (4, 2)) * np.array([w * 0.25, h], np.float32)
     dst = (src + jitter).astype(np.float32)
     m = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, m, (w, h), flags=cv2.INTER_LINEAR, borderValue=int(np.median(img)))

@@ -171,7 +171,7 @@ def ocr_receipt(rid: str, quads: list[np.ndarray], texts: list[str], size: tuple
                 image: np.ndarray | None) -> Receipt:
     """A receipt as an OCR read it: its words in the order given, empty readings left out, no tags."""
     keep = [i for i, t in enumerate(texts) if normalize(t).strip()]
-    return Receipt(rid, [normalize(texts[i]).strip() for i in keep], [np.float32(quads[i]) for i in keep], size,
+    return Receipt(rid, [normalize(texts[i]).strip() for i in keep], [np.array(quads[i], np.float32) for i in keep], size,
                    image=image)
 
 
@@ -183,7 +183,7 @@ def split_line(quad: np.ndarray, text: str) -> list[tuple[str, np.ndarray]]:
     text = normalize(text)
     if not text:
         return []
-    q = np.float32(quad).reshape(4, 2)
+    q = np.array(quad, np.float32).reshape(4, 2)
     if " " not in text:                          # one word: the line's own box, unchanged
         return [(text, q.copy())]
     tl, tr, br, bl = q
@@ -191,8 +191,8 @@ def split_line(quad: np.ndarray, text: str) -> list[tuple[str, np.ndarray]]:
     out = []
     for m in re.finditer(r"\S+", text):
         a, b = m.start() / n, m.end() / n
-        out.append((m.group(), np.float32([tl + (tr - tl) * a, tl + (tr - tl) * b, bl + (br - bl) * b,
-                                           bl + (br - bl) * a])))
+        out.append((m.group(), np.array([tl + (tr - tl) * a, tl + (tr - tl) * b, bl + (br - bl) * b,
+                                           bl + (br - bl) * a], np.float32)))
     return out
 
 
@@ -232,7 +232,7 @@ def ocr_receipts(split: str, truths: list[Receipt], folder: Path | None = None) 
     if not path.exists():
         raise FileNotFoundError(f"{path}: run scripts/prepare_m4.py first")
     rows = json.loads(path.read_text(encoding="utf8"))["receipts"]
-    return [ocr_receipt(t.id, [np.float32(q) for q in rows[t.id]["quads"]], rows[t.id]["texts"], t.size, t.image)
+    return [ocr_receipt(t.id, [np.array(q, np.float32) for q in rows[t.id]["quads"]], rows[t.id]["texts"], t.size, t.image)
             for t in truths]
 
 
