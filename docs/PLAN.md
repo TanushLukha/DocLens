@@ -930,7 +930,7 @@ The tables are in `docs/results/m6_service.md` and `docs/results/m6_checks.md`.
 
 **55. CI made to pass, and made to say why it fails.**
 What: CI had failed on every push since the first M2 commit, so its tests and its image job never
-ran. Four causes, found one after another:
+ran. Three causes, found one after another, and one precaution:
 (1) The type check. The newest releases that CI installs carry stricter type stubs: numpy 2.5 types
 `np.float32([...])` as a scalar, OpenCV 5 marks `imread` and `imdecode` as possibly returning
 nothing, PyTorch's ONNX exporter returns an optional program, and Transformers' configs and
@@ -941,13 +941,13 @@ dictionaries; nothing changes at run time (the same arrays and values).
 extension needs `libtorch_cuda.so`), so next to the CPU build that CI installs it failed on import
 with "operator torchvision::nms does not exist". CI now installs torch and torchvision together
 from PyTorch's CPU index, as the Docker image does.
-(3) System libraries. CI installs libGL and GLib, which OpenCV's wheel loads, as the image does, so
-the tests do not depend on what the runner image happens to include.
-(4) The image. Its first build in CI served pages but failed every receipt: Transformers writes
+(3) The image. Its first build in CI served pages but failed every receipt: Transformers writes
 `model.safetensors` readable by its owner only (mode 600), and `COPY` keeps that mode with root as
 the owner, so the service's user could not read LiLT's weights (safetensors reports this as a
 missing file). The Dockerfile now copies the models as the service's user. TinyGPT's image met the
 same fault (P1); the end to end check in CI is what caught it here.
+A precaution: CI installs libGL and GLib, which OpenCV's wheel loads, as the image does, so the
+tests do not depend on what the runner image happens to include.
 Every CI step runs through `scripts/ci_step.sh`: when it fails, the end of its output becomes an
 annotation, which GitHub's public API returns without a sign in (the full logs need one).
 Why: a check that always fails checks nothing. Why not pin every version in CI: a pinned CI checks
