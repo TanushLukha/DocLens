@@ -20,9 +20,11 @@ RUN pip install ".[service]"
 
 # docTR's detector weights, fetched once at build time
 RUN HF_HUB_OFFLINE=0 python -c "from doclens.doctr_lines import DoctrLines; DoctrLines(device='cpu')"
-COPY models ./models
-
 RUN useradd --create-home doclens && chown -R doclens /app/doctr
+# the models are copied as the service's user: Transformers writes model.safetensors readable by its
+# owner only (mode 600), and COPY keeps that mode with root as the owner, so the service could not
+# read it (decision 55)
+COPY --chown=doclens:doclens models ./models
 USER doclens
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
