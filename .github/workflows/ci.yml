@@ -24,9 +24,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfribidi0 tesseract-ocr libgl1 libglib2.0-0 \
             || sudo apt-get install -y libfribidi0 tesseract-ocr libgl1 libglib2.0-0t64
+      # torch and torchvision both from PyTorch's CPU index: PyPI's torchvision is built for the CUDA
+      # build of PyTorch and fails to load next to the CPU build (decision 55)
       - name: Python packages, with the CPU build of PyTorch
         run: |
-          bash scripts/ci_step.sh "Installing PyTorch" pip install torch --index-url https://download.pytorch.org/whl/cpu
+          bash scripts/ci_step.sh "Installing PyTorch" pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           bash scripts/ci_step.sh "Installing the package" pip install -e ".[dev,fields,service,export]"
       - name: Lint
         run: bash scripts/ci_step.sh "Lint" ruff check .
@@ -48,6 +50,10 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: libGL and GLib for OpenCV, which the end to end check imports
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libglib2.0-0 || sudo apt-get install -y libgl1 libglib2.0-0t64
       - name: Tiny models for the image
         run: |
           bash scripts/ci_step.sh "Installing PyTorch" pip install torch --index-url https://download.pytorch.org/whl/cpu

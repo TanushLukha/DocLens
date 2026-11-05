@@ -928,19 +928,27 @@ The tables are in `docs/results/m6_service.md` and `docs/results/m6_checks.md`.
 
 ## After M6: CI made to pass
 
-**55. Type checks against the newest libraries, as CI installs them.**
-What: the type check step had failed on every push since the first M2 commit, so CI's tests and its
-image job never ran. The causes were stricter type stubs in the newest releases that CI installs:
-numpy 2.5 types `np.float32([...])` as a scalar, OpenCV 5 marks `imread` and `imdecode` as possibly
-returning nothing, PyTorch's ONNX exporter returns an optional program, and Transformers' config
-classes and doctr's document builder type their arguments. The code now builds arrays with
-`np.array(..., np.float32)`, checks every result that can be missing, and types its keyword
-dictionaries. Nothing changes at run time (the same arrays and values): the 121 tests pass with the
-newest numpy, OpenCV and Pillow, and the type check is clean with the newest PyTorch too.
-Why: a check that always fails checks nothing; the type errors hid whether the tests and the image
-would pass on a clean machine. Why not pin every version in CI: a pinned CI checks an environment
-nobody installs; `pyproject.toml` allows the newest releases, so CI keeps checking those, and a
-failure there is an early warning about what a new user would get.
+**55. CI made to pass, and made to say why it fails.**
+What: CI had failed on every push since the first M2 commit, so its tests and its image job never
+ran. Three causes, found one after another:
+(1) The type check. The newest releases that CI installs carry stricter type stubs: numpy 2.5 types
+`np.float32([...])` as a scalar, OpenCV 5 marks `imread` and `imdecode` as possibly returning
+nothing, PyTorch's ONNX exporter returns an optional program, and Transformers' configs and
+doctr's document builder type their arguments. The code now builds arrays with
+`np.array(..., np.float32)`, checks every result that can be missing and types its keyword
+dictionaries; nothing changes at run time (the same arrays and values).
+(2) Collecting the tests. The torchvision wheel on PyPI is built for the CUDA build of PyTorch (its
+extension needs `libtorch_cuda.so`), so next to the CPU build that CI installs it failed on import
+with "operator torchvision::nms does not exist". CI now installs torch and torchvision together
+from PyTorch's CPU index, as the Docker image does.
+(3) System libraries. CI installs libGL and GLib, which OpenCV's wheel loads, as the image does, so
+the tests do not depend on what the runner image happens to include.
+Every CI step runs through `scripts/ci_step.sh`: when it fails, the end of its output becomes an
+annotation, which GitHub's public API returns without a sign in (the full logs need one).
+Why: a check that always fails checks nothing. Why not pin every version in CI: a pinned CI checks
+an environment nobody installs; `pyproject.toml` allows the newest releases, so CI keeps checking
+those, and a failure there is an early warning about what a new user would get. Why annotations:
+the second cause could only be read from logs behind a sign in, so finding it took a push of its own.
 
 ## What runs where
 
